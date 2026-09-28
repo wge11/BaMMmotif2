@@ -1883,22 +1883,26 @@ hoContributionsToInformationContent <- function( filename, useFreqs=F ){
 #
 #...............................................................................
 
+# Options such as --SFC accept TRUE/FALSE as well as 1/0 (current versions of
+# the argparse package reject "1" for logical options, so they are parsed here).
+as_flag <- function(x) toupper(as.character(x)) %in% c("TRUE", "T", "1", "YES")
+
 parser <- ArgumentParser(description='plot higher-order bamm sequence logo')
 parser$add_argument('maindir',      help='input path to the bamm file')
 parser$add_argument('prefix',       help="prefix of the target file")
 parser$add_argument('logo_order',   help='logo order, it must be not higher than bamm model order')
-parser$add_argument('--revComp',    type="logical", default=FALSE, help='flag to plot reverse complement logo of zeroth order' )
-parser$add_argument('--stamp',      type="logical", default=FALSE, help='flag to plot without axis' )
-parser$add_argument('--web',      type="logical", default=FALSE, help='flag to plot stamp and revComp for zeroth order in web mode' )
+parser$add_argument('--revComp',    default="FALSE", metavar="TRUE|FALSE", help='flag to plot reverse complement logo of zeroth order' )
+parser$add_argument('--stamp',      default="FALSE", metavar="TRUE|FALSE", help='flag to plot without axis' )
+parser$add_argument('--web',      default="FALSE", metavar="TRUE|FALSE", help='flag to plot stamp and revComp for zeroth order in web mode' )
 
 
 args        <- parser$parse_args()
 maindir     <- args$maindir
 file_prefix <- args$prefix
 order       <- args$logo_order    # read in logo order (max. order: 5)
-revComp     <- args$revComp
-stamp       <- args$stamp
-web         <- args$web
+revComp     <- as_flag(args$revComp)
+stamp       <- as_flag(args$stamp)
+web         <- as_flag(args$web)
 
 # read in filename of the bamm files without extension
 # probabilities (.ihbp) mandatory

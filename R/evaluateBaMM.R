@@ -39,17 +39,21 @@ suppressMessages(library( LSD ))
 # Parameter setting
 #
 #-----------------------------
+# Options such as --SFC accept TRUE/FALSE as well as 1/0 (current versions of
+# the argparse package reject "1" for logical options, so they are parsed here).
+as_flag <- function(x) toupper(as.character(x)) %in% c("TRUE", "T", "1", "YES")
+
 parser <- ArgumentParser(description="evaluate motifs optimized by BaMM")
 # positional arguments
 parser$add_argument('target_directory', help="directory that contains the target file")
 parser$add_argument('prefix', help="prefix of the target file")
 # optional arguments
-parser$add_argument("--fdrtool", type="logical", default=FALSE, help="flag for printing out analysis from fdrtool" )
-parser$add_argument("--SFC", type="logical", default=FALSE, help="flag for printing out sensitivity-fdr curve" )
-parser$add_argument("--ROC5", type="logical", default=FALSE, help="flag for printing out partial ROC curve" )
-parser$add_argument("--PRC", type="logical", default=FALSE, help="flag for printing out precision-recall curve" )
-parser$add_argument("--web", type="logical", default=FALSE, help="flag for printing out ausfc score on the screen" )
-parser$add_argument("--rerank", type="logical", default=FALSE, help="flag for switching to rerank mode" )
+parser$add_argument("--fdrtool", default="FALSE", metavar="TRUE|FALSE", help="flag for printing out analysis from fdrtool" )
+parser$add_argument("--SFC", default="FALSE", metavar="TRUE|FALSE", help="flag for printing out sensitivity-fdr curve" )
+parser$add_argument("--ROC5", default="FALSE", metavar="TRUE|FALSE", help="flag for printing out partial ROC curve" )
+parser$add_argument("--PRC", default="FALSE", metavar="TRUE|FALSE", help="flag for printing out precision-recall curve" )
+parser$add_argument("--web", default="FALSE", metavar="TRUE|FALSE", help="flag for printing out ausfc score on the screen" )
+parser$add_argument("--rerank", default="FALSE", metavar="TRUE|FALSE", help="flag for switching to rerank mode" )
 
 # parse the arguments
 args    <- parser$parse_args()
@@ -60,15 +64,15 @@ prefix 	<- args$prefix
 ofile   <- paste(dir, '/', prefix, ".bmscore", sep = "" )
 
 # flag for switching to rerank mode
-rerank  = args$rerank
+rerank  = as_flag(args$rerank)
 
 # flags for printing the curve plots
-print_FDRtool	= args$fdrtool
-print_SFcurve 	= args$SFC
-print_ROC5      = args$ROC5
-print_PRcurve 	= args$PRC
+print_FDRtool	= as_flag(args$fdrtool)
+print_SFcurve 	= as_flag(args$SFC)
+print_ROC5      = as_flag(args$ROC5)
+print_PRcurve 	= as_flag(args$PRC)
 # flag for verbose output for web usage
-web             = args$web
+web             = as_flag(args$web)
 
 ###########################
 ## For this script we need a slightly modified version of the fdrtool function.
@@ -364,7 +368,7 @@ results = c()
 resultTitle = paste0(c("TF_name", "#motif", "ausfc", "auc5", "auprc", "occur"), collapse="\t")
 results = c(results, resultTitle)
 
-if( length(Sys.glob(paste(c(dir, "/", prefix, "*", ".zoops.stats")))) == 0 ){
+if( length(Sys.glob(paste(c(dir, "/", prefix, "*", ".zoops.stats"), collapse=""))) == 0 ){
     stop("no input file exists in the folder!")
 }
 
