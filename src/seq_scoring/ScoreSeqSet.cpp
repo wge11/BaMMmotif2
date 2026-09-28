@@ -90,14 +90,18 @@ void ScoreSeqSet::calcPvalues( const std::vector<std::vector<float>>& pos_scores
     // sort negative set scores in ascending order
     std::sort( neg_all_scores.begin(), neg_all_scores.end(), std::less<float>() );
 
-    // get the top n-th score from the negative set
-    size_t nTop = std::min( 100, ( int )negN / 10 );
-    float S_ntop = neg_all_scores[nTop];
+    // Fit an exponential tail to the nTop highest negative scores. It is used
+    // to extrapolate p-values for positive scores that exceed (almost) all
+    // negative scores. Note that neg_all_scores is sorted in ascending order,
+    // so the highest scores are at the end of the vector.
+    size_t nTop = std::min<size_t>( 100, negN / 10 );
+    nTop = std::max<size_t>( nTop, 1 );
+    float S_ntop = neg_all_scores[negN - 1 - nTop];     // the nTop-th highest score
 
-    // calculate the rate parameter lambda
+    // calculate the rate parameter lambda (mean excess over S_ntop)
     float lambda = 0.f;
 	for( size_t n = 0; n < nTop; n++ ){
-		lambda += ( neg_all_scores[n] - S_ntop );
+		lambda += ( neg_all_scores[negN - 1 - n] - S_ntop );
 	}
 	lambda = lambda / ( float )nTop;
 
