@@ -138,14 +138,15 @@ int EM::optimize(){
 
 void EM::EStep(){
 
-    float llikelihood = 0.0f;
-
     motif_->calculateLinearS( bgModel_->getV(), K_bg_ );
+
+    const size_t YK = Y_[K_+1];
+    seqLogLikelihood_.assign( seqs_.size(), 0.0f );
 
     // calculate responsibilities r at all LW1 positions on sequence n
     // n runs over all sequences
 
-#pragma omp parallel for reduction(+:llikelihood)
+#pragma omp parallel for
     for( size_t n = 0; n < seqs_.size(); n++ ){
 
         size_t 	L = seqs_[n]->getL();
@@ -164,13 +165,16 @@ void EM::EStep(){
         }
 
         // when p(z_n > 0), ij = i+j runs over all positions in sequence
+        float* __restrict r = r_[n];
         for( size_t ij = 0; ij < LW1; ij++ ){
 
             // extract (K+1)-mer y from positions (ij-K,...,ij)
-            size_t y = kmer[ij] % Y_[K_+1];
+            size_t y = kmer[ij] % YK;
+            const float* __restrict s_y = s_[y];
+            float* __restrict r_ij = r + ( L - W_ - ij );
 
             for( size_t j = 0; j < W_; j++ ){
-                r_[n][L-W_-ij+j] *= s_[y][j];
+                r_ij[j] *= s_y[j];
             }
 
         }
@@ -191,27 +195,22 @@ void EM::EStep(){
             r_[n][i] = 0.0f;
         }
 
-        // calculate log likelihood over all sequences
-        llikelihood += logf( normFactor );
+        // log likelihood of sequence n
+        seqLogLikelihood_[n] = logf( normFactor );
     }
 
-    llikelihood_ = llikelihood;
+    // sum up the log likelihoods in sequence order, so that the result
+    // does not depend on the number of threads
+    llikelihood_ = sumLogLikelihood();
 
 }
 
-// for parallelizing MStep()
-inline void atomic_float_add(float *source, const float operand) {
-    union {
-        unsigned int intVal;
-        float floatVal;
-    } newVal, prevVal;
-
-    do {
-        prevVal.floatVal = *source;
-        newVal.floatVal = prevVal.floatVal + operand;
-    } while (__atomic_compare_exchange_n( (volatile unsigned int *)source,
-                                          &prevVal.intVal, newVal.intVal, 0,
-                                          __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) == false );
+float EM::sumLogLikelihood() const {
+    float llikelihood = 0.0f;
+    for( size_t n = 0; n < seqLogLikelihood_.size(); n++ ){
+        llikelihood += seqLogLikelihood_[n];
+    }
+    return llikelihood;
 }
 
 void EM::MStep(){
@@ -226,21 +225,55 @@ void EM::MStep(){
     }
 
     // compute fractional occurrence counts for the highest order K
-    // n runs over all sequences
-#pragma omp parallel for
-    for( size_t n = 0; n < seqs_.size(); n++ ){
-        size_t L = seqs_[n]->getL();
-        size_t* kmer = seqs_[n]->getKmer();
+    //
+    // The sequences are split into a fixed number of contiguous blocks. Each
+    // block accumulates its counts into a private buffer, and the buffers are
+    // then summed in block order. Because the blocking does not depend on the
+    // number of threads, the result is bit-for-bit reproducible for any
+    // --threads setting (the previous atomic compare-and-swap version was
+    // both slower and non-deterministic).
+    const size_t N          = seqs_.size();
+    const size_t YK         = Y_[K_+1];
+    const size_t blockSize  = YK * W_;
+    const size_t maxBytes   = size_t( 64 ) << 20;    // cap the scratch memory at 64 MB
+    size_t nBlocks = std::min( N, static_cast<size_t>( maxMStepBlocks_ ) );
+    nBlocks = std::min( nBlocks, std::max<size_t>( 1, maxBytes / ( blockSize * sizeof( double ) ) ) );
+    nBlocks = std::max<size_t>( nBlocks, 1 );
 
-        // ij = i+j runs over all positions i on sequence n
-        for( size_t ij = 0; ij < L-W_+1; ij++ ){
-            size_t y = kmer[ij] % Y_[K_+1];
-            for (size_t j = 0; j < W_; j++) {
-                // parallize for: n_[K_][y][j] += r_[n][L - W_ - ij + j];
-                atomic_float_add(&(n_[K_][y][j]), r_[n][L - W_ - ij + j]);
+    blockCounts_.assign( nBlocks * blockSize, 0.0 );
+
+#pragma omp parallel for schedule(static)
+    for( size_t b = 0; b < nBlocks; b++ ){
+        double* __restrict counts = &blockCounts_[b * blockSize];
+        const size_t first = N * b / nBlocks;
+        const size_t last  = N * ( b + 1 ) / nBlocks;
+
+        for( size_t n = first; n < last; n++ ){
+            const size_t L = seqs_[n]->getL();
+            const size_t* kmer = seqs_[n]->getKmer();
+            const float* __restrict r = r_[n];
+
+            // ij = i+j runs over all positions i on sequence n
+            for( size_t ij = 0; ij < L-W_+1; ij++ ){
+                double* __restrict counts_y = counts + ( kmer[ij] % YK ) * W_;
+                const float* __restrict r_ij = r + ( L - W_ - ij );
+                for( size_t j = 0; j < W_; j++ ){
+                    counts_y[j] += r_ij[j];
+                }
             }
         }
-    };
+    }
+
+    // reduce the per-block counts in a fixed order
+    for( size_t y = 0; y < YK; y++ ){
+        for( size_t j = 0; j < W_; j++ ){
+            double sum = 0.0;
+            for( size_t b = 0; b < nBlocks; b++ ){
+                sum += blockCounts_[b * blockSize + y * W_ + j];
+            }
+            n_[K_][y][j] = static_cast<float>( sum );
+        }
+    }
 
     // compute fractional occurrence counts from higher to lower order
     // k runs over all lower orders
@@ -385,13 +418,12 @@ int EM::mask() {
         /**
          * E-step for f_% motif occurrences
          */
-        float llikelihood = 0.0f;
-
         motif_->calculateLinearS( bgModel_->getV(), K_bg_ );
+        seqLogLikelihood_.assign( seqs_.size(), 0.0f );
 
         // calculate responsibilities r at all LW1 positions on sequence n
         // n runs over all sequences
-#pragma omp parallel for reduction(+:llikelihood)
+#pragma omp parallel for
         for( size_t n = 0; n < seqs_.size(); n++ ){
 
             size_t 	L = seqs_[n]->getL();
@@ -428,11 +460,11 @@ int EM::mask() {
                 r_[n][i] = 0.0f;
             }
 
-            // calculate log likelihood over all sequences
-            llikelihood += logf( normFactor );
+            // log likelihood of sequence n
+            seqLogLikelihood_[n] = logf( normFactor );
         }
 
-        llikelihood_ = llikelihood;
+        llikelihood_ = sumLogLikelihood();
         /**
          * M-step for f_% motif occurrences
          */

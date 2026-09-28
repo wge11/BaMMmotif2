@@ -23,14 +23,21 @@ class ScoreSeqSet{
 
 public:
 
-	ScoreSeqSet( Motif* motif, BackgroundModel* bg, std::vector<Sequence*> seqSet );
+	ScoreSeqSet( Motif* motif, BackgroundModel* bg, const std::vector<Sequence*>& seqSet );
 	~ScoreSeqSet();
 
+	// log odds scores at every position of every sequence (MOPS) and the
+	// best score per sequence (ZOOPS)
 	void calcLogOdds();
-	void calcPvalues( std::vector<std::vector<float>> pos_mops_scores, std::vector<float> neg_all_scores );
 
-	std::vector<std::vector<float>> getMopsScores();
-	std::vector<float> 				getZoopsScores();
+	// p-values of the positive scores, estimated from the (unsorted) scores of
+	// a negative/background sequence set; neg_all_scores is consumed (sorted)
+	void calcPvalues( const std::vector<std::vector<float>>& pos_mops_scores,
+	                  std::vector<float> neg_all_scores );
+
+	const std::vector<std::vector<float>>& getMopsScores() const;
+	const std::vector<float>&              getZoopsScores() const;
+	std::vector<float>                     getAllMopsScores() const;	// all MOPS scores in one vector
 
 	void write( char* odir, std::string basename, float pvalCutoff, bool ss );
     void writeLogOdds( char* odir, std::string basename, bool ss );

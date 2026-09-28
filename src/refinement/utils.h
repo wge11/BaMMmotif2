@@ -369,14 +369,6 @@ inline double digamma(double x)
 	}
 }
 
-// free allocation memory for sequence
-struct deleter{
-    void operator()(Sequence* seq){
-        free(seq->getSequence());
-        std::cout<< "hi" << std::endl;
-    };
-};
-
 namespace util
 {
 #if __cplusplus == 201402L // C++14

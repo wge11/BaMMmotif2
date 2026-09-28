@@ -52,17 +52,7 @@ int main( int nargs, char* args[] ){
      * Filter out short sequences
      */
     std::vector<Sequence*> posSet = GFdr::posSequenceSet->getSequences();
-    size_t count = 0;
-    std::vector<Sequence*>::iterator it = posSet.begin();
-    while( it != posSet.end() ){
-        if( (*it)->getL() < motif_set.getMaxW() ){
-            //std::cout << "Warning: remove the short sequence: " << (*it)->getHeader() << std::endl;
-            posSet.erase(it);
-            count++;
-        } else {
-            it++;
-        }
-    }
+    size_t count = removeShortSequences( posSet, motif_set.getMaxW() );
     std::cout << "Note: " << count << " short sequences have been filtered out." << std::endl;
 
     /**

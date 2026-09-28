@@ -235,75 +235,75 @@ void Motif::initFromPWM( float** PWM, size_t asize, SequenceSet* posSeqset, floa
 	// sampling z from each sequence of the sequence set based on the weights:
 	std::vector<Sequence*> posSet = posSeqset->getSequences();
 	std::mt19937 rngx;
-    size_t count = 0;
-    std::vector<Sequence*>::iterator it = posSet.begin();
-    while( it != posSet.end() ){
-        if( (*it)->getL() < W_ ){
-            //std::cout << "Warning: remove the short sequence: " << (*it)->getHeader() << std::endl;
-            posSet.erase(it);
-            count++;
-        } else {
-            it++;
-        }
-    }
+    size_t count = removeShortSequences( posSet, W_ );
     if( count > 0 ) std::cout << "Note: " << count
                               << " short sequences have been neglected for sampling PWM."
                               << std::endl;
 
-#pragma omp parallel for
+	// Sample one motif position z per sequence from its posterior.
+	// The posteriors are computed in parallel, chunk by chunk, but the
+	// positions are drawn serially in sequence order, so that the shared
+	// random number generator is used in a fixed order and the initial
+	// model is identical for any number of threads.
+	const size_t chunkSize = 1024;
+	std::vector<std::vector<float>> posteriors( std::min( chunkSize, posSet.size() ) );
 
-	for( size_t n = 0; n < posSet.size(); n++ ){
+	for( size_t first = 0; first < posSet.size(); first += chunkSize ){
 
-		size_t LW1 = posSet[n]->getL() - W_ + 1;
+		const size_t last = std::min( first + chunkSize, posSet.size() );
 
-		// motif position
-		size_t z;
+#pragma omp parallel for schedule(dynamic, 16)
+		for( size_t n = first; n < last; n++ ){
 
-		// get the kmer array
-		size_t* kmer = posSet[n]->getKmer();
+			size_t LW1 = posSet[n]->getL() - W_ + 1;
 
-		// calculate responsibilities over all LW1 positions on n'th sequence
-		std::vector<float> r;
-		r.resize( LW1 + 1 );
+			// get the kmer array
+			const size_t* kmer = posSet[n]->getKmer();
 
-		std::vector<float> posteriors;
-		float normFactor = 0.0f;
-		// calculate positional prior:
-		float pos0 = 1.0f - q;
-		float pos1 = q / static_cast<float>( LW1 );
+			// responsibilities over all LW1 positions on the n'th sequence;
+			// r[0] is the responsibility for "no motif on this sequence"
+			std::vector<float>& r = posteriors[n - first];
+			r.assign( LW1 + 1, 0.0f );
 
-		// todo: could be parallelized by extracting 8 sequences at once
-		// todo: should be written in a faster way
-		for( size_t i = 1; i <= LW1; i++ ){
-			r[i] = 1.0f;
-			for( size_t j = 0; j < W_; j++ ){
-				// extract monomers from motif at position i
-				// over W of the n'th sequence
-				size_t y = kmer[i-1+j] % asize;
-				r[i] *= score[y][j];
-			}
-			r[i] *= pos1;
-			normFactor += r[i];
-		}
-		// for sequences that do not contain motif
-		r[0] = pos0;
-		normFactor += r[0];
-		for( size_t i = 0; i <= LW1; i++ ){
-			r[i] /= normFactor;
-			posteriors.push_back( r[i] );
-		}
-		// draw a new position z from discrete posterior distribution
-		std::discrete_distribution<size_t> posterior_dist( posteriors.begin(), posteriors.end() );
+			float normFactor = 0.0f;
+			// calculate positional prior:
+			float pos0 = 1.0f - q;
+			float pos1 = q / static_cast<float>( LW1 );
 
-		// draw a sample z randomly
-		z = posterior_dist( rngx );
-
-		// count kmers with sampled z
-		if( z > 0 ){
-			for( size_t k = 0; k < K_+1; k++ ){
+			for( size_t i = 1; i <= LW1; i++ ){
+				float ri = 1.0f;
 				for( size_t j = 0; j < W_; j++ ){
-					size_t y = kmer[z-1+j] % Y_[k+1];
-                    __sync_fetch_and_add(&(n_[k][y][j]), 1);
+					// extract monomers from motif at position i
+					// over W of the n'th sequence
+					ri *= score[kmer[i-1+j] % asize][j];
+				}
+				r[i] = ri * pos1;
+				normFactor += r[i];
+			}
+			// for sequences that do not contain motif
+			r[0] = pos0;
+			normFactor += r[0];
+			for( size_t i = 0; i <= LW1; i++ ){
+				r[i] /= normFactor;
+			}
+		}
+
+		for( size_t n = first; n < last; n++ ){
+
+			const std::vector<float>& r = posteriors[n - first];
+
+			// draw a new position z from discrete posterior distribution
+			std::discrete_distribution<size_t> posterior_dist( r.begin(), r.end() );
+			size_t z = posterior_dist( rngx );
+
+			// count kmers with sampled z
+			if( z > 0 ){
+				const size_t* kmer = posSet[n]->getKmer();
+				for( size_t k = 0; k < K_+1; k++ ){
+					for( size_t j = 0; j < W_; j++ ){
+						size_t y = kmer[z-1+j] % Y_[k+1];
+						n_[k][y][j]++;
+					}
 				}
 			}
 		}

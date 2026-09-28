@@ -155,7 +155,7 @@ int GFdr::readArguments( int nargs, char* args[] ){
                 std::cerr << "No expression following --alphabet" << std::endl;
                 exit( 2 );
             }
-            alphabetType = args[i];
+            alphabetType = strdup( args[i] );
         } else if( !strcmp( args[i], "--bindingSiteFile" ) ){
             if( ++i >= nargs ){
                 printHelp();
@@ -295,8 +295,7 @@ int GFdr::readArguments( int nargs, char* args[] ){
     }
 
     if( alphabetType == NULL ){
-        alphabetType = new char[9];
-        strcpy( alphabetType, "STANDARD" );
+        alphabetType = strdup( "STANDARD" );
     }
 
     if( initialModelFilename == NULL ){
@@ -432,7 +431,7 @@ void GFdr::printHelp(){
 
 void GFdr::destruct(){
     Alphabet::destruct();
-    if( alphabetType ) 			delete[] alphabetType;
+    if( alphabetType ) 			free( alphabetType );
     if( posSequenceSet )	 	delete posSequenceSet;
     if( negSequenceSet ) 		delete negSequenceSet;
 }

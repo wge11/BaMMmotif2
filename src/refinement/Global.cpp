@@ -171,8 +171,7 @@ int Global::readArguments( int nargs, char* args[] ){
 	if( opt >> GetOpt::OptionPresent( "alphabet" ) ){
 		opt >> GetOpt::Option( "alphabet", alphabetType );
 	} else {
-		alphabetType = new char[9];
-		strcpy( alphabetType, "STANDARD" );
+		alphabetType = strdup( "STANDARD" );
 	}
 
 	opt >> GetOpt::OptionPresent( "ss", ss );
@@ -554,7 +553,7 @@ void Global::printHelp(){
 
 void Global::destruct(){
     Alphabet::destruct();
-    if( alphabetType ) 			delete[] alphabetType;
+    if( alphabetType ) 			free( alphabetType );
     if( posSequenceSet )	 	delete posSequenceSet;
     if( negSequenceSet ) 		delete negSequenceSet;
 }
