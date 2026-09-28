@@ -1,7 +1,9 @@
 #ifndef SEQUENCE_H_
 #define SEQUENCE_H_
 
+#include <algorithm>	// e.g. std::remove_if
 #include <cstring>	// e.g. std::memcpy
+#include <memory>	// e.g. std::unique_ptr
 #include <vector>
 
 #include <stdint.h>	// e.g. uint8_t
@@ -55,6 +57,26 @@ private:
 
 inline size_t* Sequence::getKmer(){
 	return kmer_;
+}
+
+// Remove all sequences shorter than minLength, keeping the order of the
+// others. Returns the number of removed sequences.
+inline size_t removeShortSequences( std::vector<Sequence*>& seqs, size_t minLength ){
+	size_t before = seqs.size();
+	seqs.erase( std::remove_if( seqs.begin(), seqs.end(),
+	                            [minLength]( Sequence* seq ){ return seq->getL() < minLength; } ),
+	            seqs.end() );
+	return before - seqs.size();
+}
+
+// Non-owning view of a set of owned sequences.
+inline std::vector<Sequence*> rawPointers( const std::vector<std::unique_ptr<Sequence>>& owned ){
+	std::vector<Sequence*> view;
+	view.reserve( owned.size() );
+	for( const std::unique_ptr<Sequence>& seq : owned ){
+		view.push_back( seq.get() );
+	}
+	return view;
 }
 
 #endif /* SEQUENCE_H_ */

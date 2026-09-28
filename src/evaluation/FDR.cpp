@@ -27,9 +27,9 @@ FDR::~FDR(){
 
 void FDR::evaluateMotif( bool EMoptimize, bool CGSoptimize, bool optimizeQ, bool advanceEM, float frac, size_t perLoopThreads ){
 
-	std::vector<std::vector<float>> mops_scores;
-	std::vector<float> 				zoops_scores;
-    float updatedQ = q_;            // obtain the updated q
+    // q learned on each training fold; q_ is set to the value of the last
+    // fold afterwards, independent of the order in which the folds finish
+    std::vector<float> foldQ( cvFold_, q_ );
 
     /**
 	 * Cross validation
@@ -70,11 +70,11 @@ void FDR::evaluateMotif( bool EMoptimize, bool CGSoptimize, bool optimizeQ, bool
             } else {
                 model.optimize();
             }
-            updatedQ = model.getQ();
+            foldQ[fold] = model.getQ();
 		} else if ( CGSoptimize ){
 			GibbsSampling model( motif, bgModel_, trainSet, optimizeQ );
 			model.optimize();
-            updatedQ = model.getQ();
+            foldQ[fold] = model.getQ();
 		}
 
 		/**
@@ -90,44 +90,42 @@ void FDR::evaluateMotif( bool EMoptimize, bool CGSoptimize, bool optimizeQ, bool
 
 #pragma omp critical
         {
+            // the scores are sorted in calculatePR(), so the order in which
+            // the folds append them does not matter
             if (mops_) {
-                mops_scores = score_testset.getMopsScores();
-
+                const std::vector<std::vector<float>>& pos_mops = score_testset.getMopsScores();
                 for (size_t n = 0; n < testSet.size(); n++) {
                     posScoreAll_.insert(std::end(posScoreAll_),
-                                        std::begin(mops_scores[n]),
-                                        std::end(mops_scores[n]));
+                                        std::begin(pos_mops[n]),
+                                        std::end(pos_mops[n]));
                 }
 
-                mops_scores.clear(); // reuse mops_scores vector
-
-                mops_scores = score_negset.getMopsScores();
+                const std::vector<std::vector<float>>& neg_mops = score_negset.getMopsScores();
                 for (size_t n = 0; n < negSet.size(); n++) {
                     negScoreAll_.insert(std::end(negScoreAll_),
-                                        std::begin(mops_scores[n]),
-                                        std::end(mops_scores[n]));
+                                        std::begin(neg_mops[n]),
+                                        std::end(neg_mops[n]));
                 }
             }
 
             if (zoops_) {
-                zoops_scores = score_testset.getZoopsScores();
+                const std::vector<float>& pos_zoops = score_testset.getZoopsScores();
                 posScoreMax_.insert(std::end(posScoreMax_),
-                                    std::begin(zoops_scores),
-                                    std::end(zoops_scores));
+                                    std::begin(pos_zoops),
+                                    std::end(pos_zoops));
 
-                zoops_scores.clear(); // reuse zoops_scores vector
-                zoops_scores = score_negset.getZoopsScores();
+                const std::vector<float>& neg_zoops = score_negset.getZoopsScores();
                 negScoreMax_.insert(std::end(negScoreMax_),
-                                    std::begin(zoops_scores),
-                                    std::end(zoops_scores));
+                                    std::begin(neg_zoops),
+                                    std::end(neg_zoops));
             }
 
         }
 		if( motif ) 				delete motif;
 	}
 
-    // update Q
-    q_ = updatedQ;
+    // update Q with the value learned on the last fold
+    q_ = foldQ.back();
 
     // calculate precision and recall
     calculatePR();
@@ -167,10 +165,21 @@ void FDR::calculatePR(){
 									// FP reaches maximum; otherwise, set the
 									// the number as initial cutoff
 
-		size_t len_all = posScoreAll_.size() + negScoreAll_.size();
+		const size_t posAllN = posScoreAll_.size();
+		const size_t negAllN = negScoreAll_.size();
+		const size_t len_all = posAllN + negAllN;
 
 		for( size_t i = 0; i < len_all; i++ ){
-			if( posScoreAll_[idx_posAll] > negScoreAll_[idx_negAll] || idx_negAll == len_all ){
+			// merge the two sorted lists; never read past the end of either list
+			bool takePos;
+			if( idx_negAll == negAllN ){
+				takePos = true;
+			} else if( idx_posAll == posAllN ){
+				takePos = false;
+			} else {
+				takePos = posScoreAll_[idx_posAll] > negScoreAll_[idx_negAll];
+			}
+			if( takePos ){
 				idx_posAll++;
 			} else {
 				idx_negAll++;
@@ -207,13 +216,16 @@ void FDR::calculatePR(){
 		std::sort( negScoreMax_.begin(), negScoreMax_.end(), std::greater<float>() );
 
 		// Rank and score these log odds score values
+		const size_t posMaxN = posScoreMax_.size();
+		const size_t negMaxN = negScoreMax_.size();
 		size_t idx_posMax = 0;
 		size_t idx_negMax = 0;
 		size_t min_idx_pos = 0;
 		size_t posN_est = static_cast<size_t>( q_ * ( float )posN );
 
         // set limit for using the exponential extrapolation for p-value calculation
-        size_t n_top = std::fmin(100, negN / 10);
+        size_t n_top = std::min<size_t>( 100, negN / 10 );
+        n_top = std::min( n_top, negMaxN - 1 );
 
         float lambda = 1e-16f;
         for( size_t l = 0; l < n_top; l++ ){
@@ -224,13 +236,22 @@ void FDR::calculatePR(){
 
         float Sl = 0.f;
 
-		for( size_t i = 0; i < posN + negN; i++ ){
+		for( size_t i = 0; i < posMaxN + negMaxN; i++ ){
 
-            if( (posScoreMax_[idx_posMax] > negScoreMax_[idx_negMax] || idx_posMax == 0 || idx_negMax == negN )
-                && idx_posMax < posN ){
-                Sl = posScoreMax_[idx_posMax];
-                idx_posMax++;
-            } else if( posScoreMax_[idx_posMax] == negScoreMax_[idx_negMax] && rand() % 2 == 0 && idx_posMax < posN ){
+            // merge the two sorted lists (ties are broken randomly);
+            // never read past the end of either list
+            bool takePos;
+            if( idx_negMax == negMaxN ){
+                takePos = true;
+            } else if( idx_posMax == posMaxN ){
+                takePos = false;
+            } else if( posScoreMax_[idx_posMax] > negScoreMax_[idx_negMax] || idx_posMax == 0 ){
+                takePos = true;
+            } else {
+                takePos = posScoreMax_[idx_posMax] == negScoreMax_[idx_negMax] && rand() % 2 == 0;
+            }
+
+            if( takePos ){
                 Sl = posScoreMax_[idx_posMax];
                 idx_posMax++;
             } else {
@@ -248,8 +269,12 @@ void FDR::calculatePR(){
             // calculate p-values in two different ways:
             if( Sl <= negScoreMax_[n_top] ){
 
-                float Sl_upper = *(std::lower_bound( negScoreMax_.begin(), negScoreMax_.end(), Sl, std::greater<float>() )-1);
-                float Sl_lower = *std::upper_bound( negScoreMax_.begin(), negScoreMax_.end(), Sl, std::greater<float>() );
+                // neighbouring negative scores above and below Sl
+                // (clamped to the ends of the sorted list)
+                auto upper = std::lower_bound( negScoreMax_.begin(), negScoreMax_.end(), Sl, std::greater<float>() );
+                auto lower = std::upper_bound( negScoreMax_.begin(), negScoreMax_.end(), Sl, std::greater<float>() );
+                float Sl_upper = ( upper == negScoreMax_.begin() ) ? *upper : *( upper - 1 );
+                float Sl_lower = ( lower == negScoreMax_.end() ) ? negScoreMax_.back() : *lower;
                 p_value = ( idx_negMax + ( Sl_upper- Sl) / (Sl_upper - Sl_lower + 1e-5)) / (float)negN;
 
             } else {
@@ -258,7 +283,8 @@ void FDR::calculatePR(){
 //                std::cout << i<<'\t'<< n_top << '\t' << negScoreMax_[n_top] << '\t' << Sl << '\t' << p_value << '\t'<< std::endl;
             }
 
-			PN_Pvalue_.push_back( p_value );
+			// guard against rounding and interpolation beyond the last negative score
+			PN_Pvalue_.push_back( std::min( p_value, 1.0f ) );
 
 			// take the faction of q sequences as real positives
 			if( idx_posMax == posN_est ){

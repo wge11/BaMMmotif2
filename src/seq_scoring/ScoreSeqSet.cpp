@@ -8,7 +8,7 @@
 #include "ScoreSeqSet.h"
 #include <float.h>		// -FLT_MAX
 
-ScoreSeqSet::ScoreSeqSet( Motif* motif, BackgroundModel* bg, std::vector<Sequence*> seqSet ){
+ScoreSeqSet::ScoreSeqSet( Motif* motif, BackgroundModel* bg, const std::vector<Sequence*>& seqSet ){
 
 	motif_	= motif;
 	bg_ 	= bg;
@@ -35,25 +35,32 @@ void ScoreSeqSet::calcLogOdds(){
 	motif_->calculateLogS( bg_->getV(), K_bg );
 	float** s = motif_->getS();
 
-	mops_scores_.resize( seqSet_.size() );
+	const size_t N  = seqSet_.size();
+	const size_t YK = Y_[K+1];
 
-//#pragma omp parallel for
-	for( size_t n = 0; n < seqSet_.size(); n++ ){
+	mops_scores_.assign( N, std::vector<float>() );
+	zoops_scores_.assign( N, -FLT_MAX );
+	z_.assign( N, 0 );
+
+	// each sequence is scored independently, so this loop is safe to parallelise
+#pragma omp parallel for schedule(dynamic, 64)
+	for( size_t n = 0; n < N; n++ ){
 
 		size_t 	LW1 = seqSet_[n]->getL() - W + 1;
-		size_t* kmer = seqSet_[n]->getKmer();
+		const size_t* kmer = seqSet_[n]->getKmer();
 		float 	maxScore = -FLT_MAX;
-        //float   maxScore = 0.f;
+        size_t  z_i = 0;
 
-        size_t z_i = 0;
+        std::vector<float>& scores = mops_scores_[n];
+        scores.resize( LW1 );
+
 		for( size_t i = 0; i < LW1; i++ ){
 			float logOdds = 0.0f;
 			for( size_t j = 0; j < W; j++ ){
-				size_t y = kmer[i+j] % Y_[K+1];
-				logOdds += s[y][j];
+				logOdds += s[kmer[i+j] % YK][j];
 			}
 			// take all the log odds scores for MOPS model:
-			mops_scores_[n].push_back( logOdds );
+			scores[i] = logOdds;
 
 			// take the largest log odds score for ZOOPS model:
             if( logOdds > maxScore ){
@@ -61,13 +68,13 @@ void ScoreSeqSet::calcLogOdds(){
                 z_i = i;
             }
         }
-		zoops_scores_.push_back( maxScore );
-        z_.push_back( z_i );
+		zoops_scores_[n] = maxScore;
+        z_[n] = z_i;
 	}
 }
 
 // compute p_values for motif scores based on negative sequence scores
-void ScoreSeqSet::calcPvalues( std::vector<std::vector<float>> pos_scores, std::vector<float> neg_all_scores ){
+void ScoreSeqSet::calcPvalues( const std::vector<std::vector<float>>& pos_scores, std::vector<float> neg_all_scores ){
 
 	/**
 	 * calculate P-values for motif occurrences
@@ -75,22 +82,26 @@ void ScoreSeqSet::calcPvalues( std::vector<std::vector<float>> pos_scores, std::
 
     size_t posN = seqSet_.size();
     size_t negN = neg_all_scores.size();
-    mops_p_values_.resize( posN );
-    mops_e_values_.resize( posN );
+    mops_p_values_.assign( posN, std::vector<float>() );
+    mops_e_values_.assign( posN, std::vector<float>() );
 
     float eps = 1.0e-5;
 
     // sort negative set scores in ascending order
     std::sort( neg_all_scores.begin(), neg_all_scores.end(), std::less<float>() );
 
-    // get the top n-th score from the negative set
-    size_t nTop = std::min( 100, ( int )negN / 10 );
-    float S_ntop = neg_all_scores[nTop];
+    // Fit an exponential tail to the nTop highest negative scores. It is used
+    // to extrapolate p-values for positive scores that exceed (almost) all
+    // negative scores. Note that neg_all_scores is sorted in ascending order,
+    // so the highest scores are at the end of the vector.
+    size_t nTop = std::min<size_t>( 100, negN / 10 );
+    nTop = std::max<size_t>( nTop, 1 );
+    float S_ntop = neg_all_scores[negN - 1 - nTop];     // the nTop-th highest score
 
-    // calculate the rate parameter lambda
+    // calculate the rate parameter lambda (mean excess over S_ntop)
     float lambda = 0.f;
 	for( size_t n = 0; n < nTop; n++ ){
-		lambda += ( neg_all_scores[n] - S_ntop );
+		lambda += ( neg_all_scores[negN - 1 - n] - S_ntop );
 	}
 	lambda = lambda / ( float )nTop;
 
@@ -98,6 +109,8 @@ void ScoreSeqSet::calcPvalues( std::vector<std::vector<float>> pos_scores, std::
 	for( size_t n = 0; n < seqSet_.size(); n++ ){
 
 		size_t LW1 = seqSet_[n]->getL() - motif_->getW() + 1;
+		mops_p_values_[n].reserve( LW1 );
+		mops_e_values_[n].reserve( LW1 );
 
 		for( size_t i = 0; i < LW1; i++ ){
 
@@ -114,121 +127,45 @@ void ScoreSeqSet::calcPvalues( std::vector<std::vector<float>> pos_scores, std::
 			    // when only few or no negatives are higher than S_l:
 				p_value = float( nTop ) / ( float )negN * expf( - ( Sl - S_ntop ) / lambda );
 
+			} else if( FPl == 0 ){
+			    // Sl is higher than all negative scores and the exponential
+			    // tail cannot be fitted: report the smallest resolvable p-value
+			    p_value = 1.f / ( float )negN;
+
 			} else {
 				// when Sl_higher and Sl_lower can be defined:
 				float SlHigher = neg_all_scores[negN-FPl-1];
 				float SlLower = neg_all_scores[negN-FPl];
 				p_value = ( ( float )FPl + ( SlHigher - Sl + eps ) / ( SlHigher - SlLower + eps ) ) / ( float )negN;
 			}
+            p_value = std::min( p_value, 1.f );
             mops_p_values_[n].push_back( p_value );
             mops_e_values_[n].push_back( p_value * ( float )posN );
 		}
 	}
 
-    /*
-    size_t posN = seqSet_.size();
-    size_t negN = neg_all_scores.size();
-    mops_p_values_.resize( posN );
-    mops_e_values_.resize( posN );
-
-    float eps = 1.0e-5;
-
-    std::vector<float> pos_all_scores;
-    for( size_t n = 0; n < pos_scores.size(); n++ ){
-        for( size_t i = 0; i < pos_scores[n].size(); i++ ){
-            pos_all_scores.push_back( pos_scores[n][i] );
-        }
-    }
-
-    std::vector<float> all_scores;
-    all_scores = pos_all_scores;
-    for( size_t m = 0; m < neg_all_scores.size(); m++ ){
-        all_scores.push_back( neg_all_scores[m] );
-    }
-
-    // get the permutation of index after sorting all positive and negative scores
-    // jointly in descending order
-    std::vector<size_t> pidx_all = sortIndices( all_scores );
-
-    // get the permutation of index after sorting all positive scores in descending order
-    std::vector<size_t> pidx_pos = sortIndices( pos_all_scores );
-
-    // get the permutation of index after sorting all negative scores in descending order
-    std::vector<size_t> pidx_neg = sortIndices( neg_all_scores );
-
-    size_t cScore_pos = 0;
-    size_t cScore_neg = 0;
-
-    std::vector<size_t> FP;
-    std::vector<float> pValues;
-    std::vector<float> eValues;
-    // pre-calculation:
-    // get the top n-th score from the negative set
-    size_t nTop = std::min( 100, (int)negN / 10 );
-    float S_ntop = neg_all_scores[pidx_neg[nTop-1]];
-    // calculate the rate parameter lambda
-    float lambda = 0.f;
-    for( size_t n = 0; n < nTop; n++ ){
-        lambda += ( neg_all_scores[pidx_neg[n]] - S_ntop );
-    }
-    lambda = lambda / ( float )nTop;
-
-    std::cout << S_ntop << '\t' << lambda << std::endl;
-    std::cout << pos_all_scores.size() << '\t' << neg_all_scores.size() << std::endl;
-
-    for( size_t l = 0; l < all_scores.size(); l++ ){
-        // calculate the accumulated number of scores for both positive and negative score lists
-        // Note: for ties (equal scores), the negative scores are always ranked before the positive scores
-        if( ( neg_all_scores[pidx_neg[cScore_neg]] >= pos_all_scores[pidx_pos[cScore_pos]] and cScore_neg < negN )
-            or cScore_pos == pos_all_scores.size() ){
-            cScore_neg ++;
-        } else {
-            cScore_pos ++;
-        }
-
-        // take the accumulated score for negative set as false positive of entry l
-        FP.push_back( cScore_neg );
-
-        float Sl = all_scores[pidx_all[l]];
-        float Sl_higher = neg_all_scores[pidx_neg[cScore_neg] - 1];
-        float Sl_lower = neg_all_scores[pidx_neg[cScore_neg]];
-
-        // calculate p-values for entry l
-        float pVal;
-        if( FP[l] > 10 or fabs( lambda ) < eps ) {
-            pVal = ((float) FP[l] + (Sl_higher - Sl) / (Sl_higher - Sl_lower + eps)) / (float) negN;
-        } else {
-            pVal = nTop * expf( ( S_ntop - Sl ) / lambda ) / (float)negN;
-        }
-        pValues.push_back(pVal);
-
-        // if(l < 100) std::cout << pVal << std::endl;
-        //std::cout << l << '\t';
-    }
-
-    // assign p-value to each position on the sequence
-    size_t site = 0;
-
-    for( size_t n = 0; n < posN; n++ ){
-
-		size_t LW1 = seqSet_[n]->getL() - motif_->getW() + 1;
-
-		for( size_t i = 0; i < LW1; i++ ){
-            mops_p_values_[n].push_back( pValues[pidx_all[site]] );
-            mops_e_values_[n].push_back( pValues[pidx_all[site]] * posN );
-            site ++;
-		}
-	}
-*/
     pval_is_calulated_ = true;
 }
 
-std::vector<std::vector<float>> ScoreSeqSet::getMopsScores(){
+const std::vector<std::vector<float>>& ScoreSeqSet::getMopsScores() const {
 	return mops_scores_;
 }
 
-std::vector<float> ScoreSeqSet::getZoopsScores(){
+const std::vector<float>& ScoreSeqSet::getZoopsScores() const {
 	return zoops_scores_;
+}
+
+std::vector<float> ScoreSeqSet::getAllMopsScores() const {
+	size_t total = 0;
+	for( const std::vector<float>& scores : mops_scores_ ){
+		total += scores.size();
+	}
+	std::vector<float> all;
+	all.reserve( total );
+	for( const std::vector<float>& scores : mops_scores_ ){
+		all.insert( all.end(), scores.begin(), scores.end() );
+	}
+	return all;
 }
 
 void ScoreSeqSet::printLogOdds(){
@@ -268,6 +205,12 @@ void ScoreSeqSet::write( char* odir, std::string basename, float pvalCutoff, boo
 		size_t LW1 = seqSet_[n]->getL() - motif_->getW() + 1;
 
         for( size_t i = 0; i < LW1; i++ ){
+
+            // on double-stranded sequences, skip windows that span the
+            // separator between the forward and the reverse-complement strand
+            if( !ss and i <= seqlen and i + motif_->getW() > seqlen ){
+                continue;
+            }
 
 			if( mops_p_values_[n][i] < pvalCutoff ){
                 // >header:sequence_length

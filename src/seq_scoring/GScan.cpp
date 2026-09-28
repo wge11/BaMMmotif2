@@ -121,7 +121,7 @@ int GScan::readArguments( int nargs, char* args[] ){
                 std::cerr << "No expression following --alphabet" << std::endl;
                 exit( 2 );
             }
-            alphabetType = args[i];
+            alphabetType = strdup( args[i] );
         } else if( !strcmp( args[i], "--bindingSiteFile" ) ){
             if( ++i >= nargs ){
                 printHelp();
@@ -225,8 +225,7 @@ int GScan::readArguments( int nargs, char* args[] ){
     }
 
     if( alphabetType == NULL ){
-        alphabetType = new char[9];
-        strcpy( alphabetType, "STANDARD" );
+        alphabetType = strdup( "STANDARD" );
     }
 
     if( initialModelFilename == NULL ){
@@ -292,14 +291,14 @@ void GScan::printHelp(){
               << "\t\t--maxPWM <INTEGER>" << std::endl
               << "\t\t\tmaximal number of PWMs that should be optimized." << std::endl
               << "\t\t--basename <STRING>" << std::endl
-              << "\t\t\tbasename of the outputt files." << std::endl
+              << "\t\t\tbasename of the output files." << std::endl
               << "\t\t--pvalCutoff <FLOAT>" << std::endl
               << "\t\t\tp-value cutoff for scoring the sequences." << std::endl ;
 }
 
 void GScan::destruct(){
     Alphabet::destruct();
-    if( alphabetType ) 			delete[] alphabetType;
+    if( alphabetType ) 			free( alphabetType );
     if( posSequenceSet )	 	delete posSequenceSet;
     if( negSequenceSet ) 		delete negSequenceSet;
 }

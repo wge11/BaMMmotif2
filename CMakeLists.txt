@@ -1,45 +1,59 @@
-cmake_minimum_required (VERSION 2.8.11 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.10)
 
-project (BaMMmotif-v2)
+project(BaMMmotif VERSION 2.0.0 LANGUAGES CXX)
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(FindASan)   # adds the optional build type -DCMAKE_BUILD_TYPE=ASan
 
-include(FindASan)
-
-# link to Boost library
-set (Boost_USE_STATIC_LIBS ON CACHE BOOL "use static libraries from Boost")
-set (Boost_USE_MULTITHREADED ON)
-set (Boost_USE_STATIC_RUNTIME OFF)
-find_package (Boost REQUIRED)
-include_directories (${Boost_INCLUDE_DIR})
-link_libraries (${Boost_LIBRARIES})
-
-# set the version of BaMM!motif
-set (BAMMMOTIF_MAJOR_VERSION 2)
-set (BAMMMOTIF_MINOR_VERSION 0)
-set (BAMMMOTIF_PATCH_VERSION 0)
-set (BAMMMOTIF_VERSION ${BAMMMOTIF_MAJOR_VERSION}.${BAMMMOTIF_MINOR_VERSION}.${BAMMMOTIF_PATCH_VERSION})
-
-set (CMAKE_CXX_FLAGS "-std=c++11 -Wall")
-
-find_package(OpenMP)
-if(OPENMP_FOUND OR OpenMP_FOUND OR OpenMP_CXX_FOUND)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-    add_definitions(-DOPENMP)
+# Default to an optimised build. Without a build type CMake compiles with no
+# optimisation at all, which makes BaMM!motif about 2x slower.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    message(STATUS "No build type given, using Release")
+    set(CMAKE_BUILD_TYPE Release CACHE STRING
+        "Build type: Release, RelWithDebInfo, Debug or ASan" FORCE)
 endif()
 
-set (CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-install (DIRECTORY R/ ${CMAKE_BINARY_DIR}/bin/
-        DESTINATION bin
-        PATTERN *
-        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
-        )
+option(BAMM_NATIVE "Optimise for the CPU of the build machine (-march=native); binaries may not run on other machines" OFF)
+option(BAMM_WERROR "Treat compiler warnings as errors" OFF)
 
-add_subdirectory (src/getopt_pp getopt_pp)
-add_subdirectory (src/init init)
-add_subdirectory (src/seq_generator seq_generator)
-add_subdirectory (src/seq_scoring seq_scoring)
-add_subdirectory (src/refinement bamm)
-add_subdirectory (src/evaluation evaluation)
-add_subdirectory (src/misc extractProbs)
+add_compile_options(-Wall)
+if(BAMM_WERROR)
+    add_compile_options(-Werror)
+endif()
+if(BAMM_NATIVE)
+    add_compile_options(-march=native)
+endif()
+
+# Boost (header-only parts: special functions and distributions)
+find_package(Boost REQUIRED)
+include_directories(${Boost_INCLUDE_DIRS})
+
+# OpenMP is optional; without it all tools run single-threaded
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    link_libraries(OpenMP::OpenMP_CXX)
+    add_compile_definitions(OPENMP)
+else()
+    message(WARNING "OpenMP not found: BaMM!motif will run single-threaded")
+endif()
+
+add_subdirectory(src)
+
+# R and Python helper scripts for plotting and format conversion
+install(DIRECTORY R/ DESTINATION bin
+        FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                         GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+        FILES_MATCHING PATTERN "*.R")
+install(DIRECTORY py/ DESTINATION share/bamm/py
+        FILES_MATCHING PATTERN "*.py")
+
+# `ctest` runs all tools on the bundled example and compares the results
+# with tests/reference
+enable_testing()
+add_test(NAME examples
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_examples.sh ${CMAKE_BINARY_DIR}/bin)

@@ -1,11 +1,13 @@
 import argparse
 from collections import defaultdict
 from enum import IntEnum
+
 import numpy as np
 
 IUPAC_ALPHABET_SIZE = 11
 
-#an enum to encode the int representation of the iupac nucleotides
+
+# an enum to encode the int representation of the iupac nucleotides
 class IUPACNucleotide(IntEnum):
     A = 0
     C = 1
@@ -22,8 +24,8 @@ class IUPACNucleotide(IntEnum):
 
 def create_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('bamm_file')
-    parser.add_argument('meme_file')
+    parser.add_argument("bamm_file")
+    parser.add_argument("meme_file")
     return parser
 
 
@@ -41,16 +43,15 @@ def main():
             if len(line.split()) == 0:
                 motif_length = motif_length + 1
             if len(line.split()) == 4:
-                new_line = np.fromstring(line, dtype=float, sep=' ')
-                sum = np.sum(new_line)
-                new_line /= sum
+                new_line = np.array(line.split(), dtype=float)
+                new_line /= new_line.sum()
                 pwm.append(new_line)
 
-    #model_order = int( line_number / motif_length ) - 2
-    model['pattern_length'] = motif_length
-    model['alphabet'] = "ACGT"
-    model['pwm'] = pwm
-    model['bg_freqs'] = [0.25,0.25,0.25,0.25]
+    # model_order = int( line_number / motif_length ) - 2
+    model["pattern_length"] = motif_length
+    model["alphabet"] = "ACGT"
+    model["pwm"] = pwm
+    model["bg_freqs"] = [0.25, 0.25, 0.25, 0.25]
 
     # generative a IUPAC string
     representative_iupac_nucleotides = init_representative_map()
@@ -58,7 +59,7 @@ def main():
     bg_model = get_bg_model()
     iupac_profiles = init_iupac_profiles(representative_iupac_nucleotides, bg_model)
     IUPAC = get_iupac_string(pwm, iupac_profiles, int2char)
-    model['iupac_motif'] = IUPAC
+    model["iupac_motif"] = IUPAC
 
     write_meme(model, args.meme_file)
 
@@ -69,7 +70,7 @@ def write_meme(model, ofile):
         print("MEME version 4", file=fh)
         print(file=fh)
 
-        print("ALPHABET= " + model['alphabet'], file=fh)
+        print("ALPHABET= " + model["alphabet"], file=fh)
         print(file=fh)
 
         print("Background letter frequencies", file=fh)
@@ -81,16 +82,20 @@ def write_meme(model, ofile):
         print(file=fh)
 
         print("MOTIF {}".format(model["iupac_motif"]), file=fh)
-        print(("letter-probability matrix: alength= {} w= {}")
-               .format(len(model['alphabet']), model["pattern_length"]), file=fh)
+        print(
+            ("letter-probability matrix: alength= {} w= {}").format(
+                len(model["alphabet"]), model["pattern_length"]
+            ),
+            file=fh,
+        )
 
         for line in model["pwm"]:
-            print(" ".join(['{:.4f}'.format(x) for x in line]), file=fh)
+            print(" ".join([f"{x:.4f}" for x in line]), file=fh)
 
         print(file=fh)
 
 
-#generates the map for the amiguous iupac nucleotides e.g.: N -> A, C, G, T
+# generates the map for the amiguous iupac nucleotides e.g.: N -> A, C, G, T
 def init_representative_map():
     representative_iupac_nucleotides = defaultdict(list)
 
@@ -125,21 +130,21 @@ def init_representative_map():
     return representative_iupac_nucleotides
 
 
-#generates a map to translate the int representation of the iupac nucleotides to chars
+# generates a map to translate the int representation of the iupac nucleotides to chars
 def get_iupac_int2char():
     int2char = dict()
 
-    int2char[IUPACNucleotide.A] = 'A'
-    int2char[IUPACNucleotide.C] = 'C'
-    int2char[IUPACNucleotide.G] = 'G'
-    int2char[IUPACNucleotide.T] = 'T'
-    int2char[IUPACNucleotide.S] = 'S'
-    int2char[IUPACNucleotide.W] = 'W'
-    int2char[IUPACNucleotide.R] = 'R'
-    int2char[IUPACNucleotide.Y] = 'Y'
-    int2char[IUPACNucleotide.M] = 'M'
-    int2char[IUPACNucleotide.K] = 'K'
-    int2char[IUPACNucleotide.N] = 'N'
+    int2char[IUPACNucleotide.A] = "A"
+    int2char[IUPACNucleotide.C] = "C"
+    int2char[IUPACNucleotide.G] = "G"
+    int2char[IUPACNucleotide.T] = "T"
+    int2char[IUPACNucleotide.S] = "S"
+    int2char[IUPACNucleotide.W] = "W"
+    int2char[IUPACNucleotide.R] = "R"
+    int2char[IUPACNucleotide.Y] = "Y"
+    int2char[IUPACNucleotide.M] = "M"
+    int2char[IUPACNucleotide.K] = "K"
+    int2char[IUPACNucleotide.N] = "N"
 
     return int2char
 
@@ -156,7 +161,7 @@ def get_bg_model():
 
 # init the profiles for the iupac nucleotides with the given bg_model
 def init_iupac_profiles(representative_iupac_nucleotides, bg_model, c=0.2, t=0.7):
-    iupac_profiles = np.zeros((IUPAC_ALPHABET_SIZE, 4), np.float)
+    iupac_profiles = np.zeros((IUPAC_ALPHABET_SIZE, 4), dtype=float)
 
     for iupac_c in range(IUPAC_ALPHABET_SIZE):
         rep = representative_iupac_nucleotides[iupac_c]
@@ -168,7 +173,7 @@ def init_iupac_profiles(representative_iupac_nucleotides, bg_model, c=0.2, t=0.7
     return iupac_profiles
 
 
-#calculates the distance between two profiles; based on the Shannon Entropy?
+# calculates the distance between two profiles; based on the Shannon Entropy?
 def calculate_d(profile1, profile2):
     d = 0.0
     for a in range(4):
@@ -176,7 +181,7 @@ def calculate_d(profile1, profile2):
     return d
 
 
-#finds for each profile in the pwm the closest iupac profile
+# finds for each profile in the pwm the closest iupac profile
 def get_iupac_string(pwm, iupac_profiles, int2char):
     res = []
 
@@ -195,5 +200,5 @@ def get_iupac_string(pwm, iupac_profiles, int2char):
     return "".join(res)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

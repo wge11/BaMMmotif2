@@ -20,11 +20,7 @@ int main( int nargs, char* args[] ) {
      * Build up the background model
      */
     // use bgModel generated from input sequences when prediction is turned on
-    BackgroundModel* bgModel = new BackgroundModel( GScan::negSequenceSet->getSequences(),
-                                       GScan::bgModelOrder,
-                                       GScan::bgModelAlpha,
-                                       GScan::interpolateBG,
-                                       GScan::outputFileBasename );
+    BackgroundModel* bgModel;
 
     // use provided bgModelFile if initialized with bamm format
     if( GScan::initialModelTag == "BaMM" ) {
@@ -34,9 +30,16 @@ int main( int nargs, char* args[] ) {
         }
         // get background model from the given file
         bgModel = new BackgroundModel( GScan::bgModelFilename );
-    } else if( GScan::initialModelTag == "PWM" ){
-        // this means that also the global motif order needs to be adjusted;
-        GScan::modelOrder = 0;
+    } else {
+        bgModel = new BackgroundModel( GScan::negSequenceSet->getSequences(),
+                                       GScan::bgModelOrder,
+                                       GScan::bgModelAlpha,
+                                       GScan::interpolateBG,
+                                       GScan::outputFileBasename );
+        if( GScan::initialModelTag == "PWM" ){
+            // this means that also the global motif order needs to be adjusted;
+            GScan::modelOrder = 0;
+        }
     }
 
     if(GScan::saveInitialModel){
@@ -62,20 +65,11 @@ int main( int nargs, char* args[] ) {
     /**
      * Filter out short sequences
      */
-    std::vector<Sequence*>::iterator it = posSet.begin();
-    while( it != posSet.end() ){
-        if( (*it)->getL() < motif_set.getMaxW() ){
-            //std::cout << "Warning: remove the short sequence: " << (*it)->getHeader() << std::endl;
-            posSet.erase(it);
-        } else {
-            it++;
-        }
-    }
+    removeShortSequences( posSet, motif_set.getMaxW() );
 
     /**
      * Sample negative sequence set based on s-mer frequencies
      */
-    std::vector<Sequence*>  negset;
     size_t minSeqN = 5000;
     // sample negative sequence set B1set based on s-mer frequencies
     // from positive training sequence set
@@ -86,11 +80,8 @@ int main( int nargs, char* args[] ) {
     } else {
         negSeqs = negseq.sample_bgseqset_by_num( minSeqN, GScan::posSequenceSet->getMaxL() );
     }
-    // convert unique_ptr to regular pointer
-    for( size_t n = 0; n < negSeqs.size(); n++ ) {
-        negset.push_back( negSeqs[n].release() );
-        negSeqs[n].get_deleter();
-    }
+    // negSeqs owns the sampled sequences; negset is a non-owning view
+    std::vector<Sequence*> negset = rawPointers( negSeqs );
 
 #pragma omp parallel for
     for( size_t n = 0; n < motif_set.getN(); n++ ) {
@@ -111,21 +102,14 @@ int main( int nargs, char* args[] ) {
         // score negative sequence set
         ScoreSeqSet scoreNegSet( motif, bgModel, negset );
         scoreNegSet.calcLogOdds();
-        std::vector<std::vector<float>> negAllScores = scoreNegSet.getMopsScores();
-        std::vector<float> negScores;
-        for( size_t n = 0; n < negset.size(); n++ ){
-            negScores.insert( std::end( negScores ),
-                              std::begin( negAllScores[n] ),
-                              std::end( negAllScores[n] ) );
-        }
+        std::vector<float> negScores = scoreNegSet.getAllMopsScores();
 
         // score positive sequence set
         // calculate p-values based on positive and negative scores
         ScoreSeqSet scorePosSet( motif, bgModel, posSet );
         scorePosSet.calcLogOdds();
 
-        std::vector<std::vector<float>> posScores = scorePosSet.getMopsScores();
-        scorePosSet.calcPvalues( posScores, negScores );
+        scorePosSet.calcPvalues( scorePosSet.getMopsScores(), std::move( negScores ) );
 
         scorePosSet.write( GScan::outputDirectory,
                            GScan::outputFileBasename + fileExtension,

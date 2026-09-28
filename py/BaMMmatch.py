@@ -1,38 +1,55 @@
-'''
+"""
 This script is used for comparing a given motif to motifs in a given database.
 Prerequisite: all motifs in database must be in BaMM format.
 Note: currently it only compares motifs by 0th-order.
-'''
+"""
 
 import argparse
-from multiprocessing import Pool
-import numpy as np
 import logging
 import sys
+from multiprocessing import Pool
 
+import numpy as np
 
-from utils import calculate_H_model_bg, calculate_H_model, model_sim, update_models, \
-    parse_meme, parse_bamm_db, parse_bamm_file
+from utils import (
+    calculate_H_model,
+    calculate_H_model_bg,
+    model_sim,
+    parse_bamm_db,
+    parse_bamm_file,
+    parse_meme,
+    update_models,
+)
 
 
 def create_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('input_file', help="input MEME-format file with multiple PWMs")
-    parser.add_argument('db_path', help="specify the path to database that you want to search for")
-    parser.add_argument('output_score_file', default=None, help="name the output file with path")
+    parser.add_argument("input_file", help="input MEME-format file with multiple PWMs")
+    parser.add_argument("db_path", help="specify the path to database that you want to search for")
+    parser.add_argument("output_score_file", default=None, help="name the output file with path")
 
-    parser.add_argument('--input_format', default="PWM",
-                        help="declare input format: PWM or BaMM. This needs to be consistent with your input model! "
-                             "Default: PWM")
+    parser.add_argument(
+        "--input_format",
+        default="PWM",
+        help="declare input format: PWM or BaMM. This needs to be consistent with your input model! "
+        "Default: PWM",
+    )
 
-    parser.add_argument('--n_neg_perm', type=int, default=10, help="number of negative permutations. Default: 10")
-    parser.add_argument('--highscore_fraction', type=float, default=0.1)
-    parser.add_argument('--pvalue_threshold', type=float, default=0.01,
-                        help="p-value threshold for output models. Default: 0.01")
-    parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--min_overlap', type=int, default=2, help="minimal overlaps between PWMs. Default: 2")
-    parser.add_argument('--n_processes', type=int, default=4, help="how many cores are used. Default: 4")
-
+    parser.add_argument(
+        "--n_neg_perm", type=int, default=10, help="number of negative permutations. Default: 10"
+    )
+    parser.add_argument("--highscore_fraction", type=float, default=0.1)
+    parser.add_argument(
+        "--pvalue_threshold",
+        type=float,
+        default=0.01,
+        help="p-value threshold for output models. Default: 0.01",
+    )
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--min_overlap", type=int, default=2, help="minimal overlaps between PWMs. Default: 2"
+    )
+    parser.add_argument("--n_processes", type=int, default=4, help="how many cores are used. Default: 4")
 
     return parser
 
@@ -48,7 +65,7 @@ def main():
     # print out logs
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
-    logger_fmt = '%(asctime)s [%(levelname)s]  %(message)s'
+    logger_fmt = "%(asctime)s [%(levelname)s]  %(message)s"
     formatter = logging.Formatter(logger_fmt)
     console_handler = logging.StreamHandler(stream=sys.stdout)
     console_handler.setFormatter(formatter)
@@ -60,19 +77,19 @@ def main():
     query_model_set = []
     if model_format == "PWM":
         # parse input meme file
-        query_model_set = parse_meme(query_file)['models']
+        query_model_set = parse_meme(query_file)["models"]
     elif model_format == "BaMM":
         # parse input bamm file
         query_model_set = parse_bamm_file(query_file)
 
     else:
-        logger.info('Input model file is not recognised. ')
+        sys.exit(f"Error: --input_format must be PWM or BaMM, not {model_format!r}")
 
     # pre-compute entropy for all query meme models
     models = update_models(query_model_set)
 
     # parse bamms from the target database
-    logger.info('Reading in BaMMs from the target database')
+    logger.info("Reading in BaMMs from the target database")
     target_db = parse_bamm_db(target_db_path)
 
     # pre-compute entropy for all models in target database
@@ -80,28 +97,20 @@ def main():
 
     db_size = len(db_models)
 
-    # initialize task for paralleling jobs
-    def init_workers():
-        np.random.seed(args.seed)
-        global highscore_fraction_g
-        highscore_fraction_g = args.highscore_fraction
-        global pvalue_thresh_g
-        pvalue_thresh_g = args.pvalue_threshold
-        global db_models_g
-        db_models_g = db_models
-        global db_size_g
-        db_size_g = db_size
-        global n_neg_perm_g
-        n_neg_perm_g = args.n_neg_perm
-        global min_overlap_g
-        min_overlap_g = args.min_overlap
+    logger.info("Queuing %s search jobs", len(models))
 
-    logger.info('Queuing %s search jobs', len(models))
-
-    with open(output_score_file, 'w') as out:
-        print('model_id', 'db_id', 'p-value', 'e-value', 'sim_score',
-              'model_width', sep='\t', file=out)
-        with Pool(args.n_processes, initializer=init_workers) as pool:
+    with open(output_score_file, "w") as out:
+        print("model_id", "db_id", "p-value", "e-value", "sim_score", "model_width", sep="\t", file=out)
+        worker_args = (
+            args.seed,
+            args.highscore_fraction,
+            args.pvalue_threshold,
+            db_models,
+            db_size,
+            args.n_neg_perm,
+            args.min_overlap,
+        )
+        with Pool(args.n_processes, initializer=init_workers, initargs=worker_args) as pool:
             jobs = []
             for model in models:
                 job = pool.apply_async(motif_search, args=(model,))
@@ -112,14 +121,30 @@ def main():
                 hits = job.get()
                 hits.sort(key=lambda x: x[3])
                 for hit in hits:
-                    print(*hit, sep='\t', file=out)
-                    logger.info('Finished (%s/%s)', job_index, total_jobs)
+                    print(*hit, sep="\t", file=out)
+                    logger.info("Finished (%s/%s)", job_index, total_jobs)
+
+
+def init_workers(seed, highscore_fraction, pvalue_thresh, db_models, db_size, n_neg_perm, min_overlap):
+    """Store the shared search settings in each worker process.
+
+    Defined at module level so that it also works with the 'spawn' and
+    'forkserver' start methods (default on macOS and, from Python 3.14, Linux).
+    """
+    global highscore_fraction_g, pvalue_thresh_g, db_models_g, db_size_g, n_neg_perm_g, min_overlap_g
+    np.random.seed(seed)
+    highscore_fraction_g = highscore_fraction
+    pvalue_thresh_g = pvalue_thresh
+    db_models_g = db_models
+    db_size_g = db_size
+    n_neg_perm_g = n_neg_perm
+    min_overlap_g = min_overlap
 
 
 def motif_search(model):
-    model_pwm   = model['pwm']
-    model_len   = len(model_pwm)
-    bg_freq     = model['bg_freq']
+    model_pwm = model["pwm"]
+    model_len = len(model_pwm)
+    bg_freq = model["bg_freq"]
 
     assert model_len > 1
 
@@ -131,22 +156,26 @@ def motif_search(model):
         # calculate a locality preserving permutation
         Z = np.random.normal(0, 1, model_len)
         shuffle_ind = np.argsort(2 * Z - np.arange(model_len))
-        shuffle_model['pwm'] = model_pwm[shuffle_ind]
+        shuffle_model["pwm"] = model_pwm[shuffle_ind]
 
         # nucleotide substitution
         for j in range(model_len):
             # 1) switch A->T with p=0.5 per column
             if np.random.normal(0, 1) > 0.5:
-                shuffle_model['pwm'][j][0], shuffle_model['pwm'][j][3] = \
-                    shuffle_model['pwm'][j][3], shuffle_model['pwm'][j][0]
+                shuffle_model["pwm"][j][0], shuffle_model["pwm"][j][3] = (
+                    shuffle_model["pwm"][j][3],
+                    shuffle_model["pwm"][j][0],
+                )
 
             # 2) switch C->G with p=0.5 per column
             if np.random.normal(0, 1) > 0.5:
-                shuffle_model['pwm'][j][1], shuffle_model['pwm'][j][2] = \
-                    shuffle_model['pwm'][j][2], shuffle_model['pwm'][j][1]
+                shuffle_model["pwm"][j][1], shuffle_model["pwm"][j][2] = (
+                    shuffle_model["pwm"][j][2],
+                    shuffle_model["pwm"][j][1],
+                )
 
-        shuffle_model['H_model']    = calculate_H_model(shuffle_model['pwm'])
-        shuffle_model['H_model_bg'] = calculate_H_model_bg(shuffle_model['pwm'], bg_freq)
+        shuffle_model["H_model"] = calculate_H_model(shuffle_model["pwm"])
+        shuffle_model["H_model_bg"] = calculate_H_model_bg(shuffle_model["pwm"], bg_freq)
 
         for db_model in db_models_g:
             shuffle_sim, *_ = model_sim(shuffle_model, db_model, min_overlap_g)
@@ -156,7 +185,7 @@ def motif_search(model):
     # distribution
     sorted_null = np.sort(shuffled_dists)
     N_neg = len(sorted_null)
-    high_scores = sorted_null[-int(N_neg * highscore_fraction_g):]
+    high_scores = sorted_null[-int(N_neg * highscore_fraction_g) :]
     high_score = high_scores[0]
     exp_lambda = 1 / np.mean(high_scores - high_score)
 
@@ -169,14 +198,16 @@ def motif_search(model):
             # this is surely not a significant hit
             continue
 
-        pvalue = highscore_fraction_g * np.exp(- exp_lambda * (sim - high_score))
+        pvalue = highscore_fraction_g * np.exp(-exp_lambda * (sim - high_score))
         evalue = db_size_g * pvalue
 
         if pvalue < pvalue_thresh_g:
-            hits.append((model['model_id'], db_model['model_id'], pvalue, evalue, sim, db_model['motif_length']) )
+            hits.append(
+                (model["model_id"], db_model["model_id"], pvalue, evalue, sim, db_model["motif_length"])
+            )
 
     return hits
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

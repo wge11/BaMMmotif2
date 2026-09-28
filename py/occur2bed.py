@@ -1,83 +1,98 @@
-'''
- This script is for converting .occurrence file to .bed file
- The output file contains:
- CHROM START END STRAND
-'''
+"""Convert a BaMM!motif .occurrence file into a BED-like file.
 
+The sequence headers of the scanned FASTA file must contain genomic
+coordinates in the ``chrom:start-end`` form written by ``bedtools getfasta``
+(0-based start, exclusive end), for example ``>chr1:1000-1205``.
+
+Output columns (tab-separated, with a header line):
+
+    #CHROM  START  END  STRAND  Pval
+
+START is 0-based and END is exclusive, as in BED. Occurrences on the reverse
+strand are mapped back onto forward-strand genomic coordinates.
+
+Usage:
+    python occur2bed.py SAMPLE_motif_1.occurrence [-o OUTDIR]
+"""
 
 import argparse
 import os
-import pandas as pd
+import re
+import sys
+
+HEADER_RE = re.compile(r"^>?(?P<chrom>[^:\s]+):(?P<start>\d+)-(?P<end>\d+)")
 
 
 def create_parser():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('occurence_file')
-    parser.add_argument('-o', default=None)
+    parser = argparse.ArgumentParser(
+        description="Convert a BaMM!motif .occurrence file into a BED-like file."
+    )
+    parser.add_argument(
+        "occurrence_file", help=".occurrence file written by BaMMScan or BaMMmotif --scoreSeqset"
+    )
+    parser.add_argument(
+        "-o", dest="outdir", default=None, help="output directory (default: next to the input file)"
+    )
     return parser
 
 
-def parse_occur(ipath):
-    df = pd.read_csv(ipath, sep='\t',header=1, names=['chrom', 'length', 'strand', 'pos', 'pattern', 'p-val', 'e-val'])
-    chrom, srange = df['chrom'].str.split(':').str
-    _, chrom = chrom.str.split('>').str
+def occurrence_to_bed(header, seq_length, strand, pos, pvalue):
+    """Map one occurrence to (chrom, start, end, strand, pvalue).
 
-    if srange.str.find('-')[1] == -1:
-        print("Error: the header line contains no information for generating bed file!")
-        exit()
+    ``pos`` is the ``start..end`` field of the .occurrence file. Positions are
+    1-based and inclusive on the sequence that BaMM!motif scans: the forward
+    strand (positions 1..L), a separator, and the reverse complement
+    (positions L+2..2L+1).
+    """
+    match = HEADER_RE.match(header)
+    if match is None:
+        raise ValueError(
+            f"sequence header {header!r} contains no genomic coordinates (expected e.g. '>chr1:1000-1205')"
+        )
+    chrom = match.group("chrom")
+    region_start = int(match.group("start"))
+    motif_start, motif_end = (int(x) for x in pos.split(".."))
+
+    if strand == "+":
+        start = region_start + motif_start - 1
+        end = region_start + motif_end
     else:
-        sleft, sright = srange.str.split('-').str
-        strand = df['strand']
-        mstart, _, mend = df['pos'].str.split('.').str
-        length = df['length'][1]
-
-        sleft=sleft.astype(int)
-        sright=sright.astype(int)
-        mstart=mstart.astype(int)
-        mend=mend.astype(int)
-        start, end = [], []
-        for i in range(len(chrom)):
-            if strand[i] == '+':
-                s_start = sleft[i] + mstart[i] -1
-                s_end = sleft[i] + mend[i] - 1
-            else:
-                s_start = sleft[i] + 2 * length - mend[i] -1
-                s_end = sleft[i] + 2 * length - mstart[i] - 1
-            start.append(s_start)
-            end.append(s_end)
-
-        occurs = pd.DataFrame(columns=['#CHROM', 'START', 'END', 'STRAND', 'Pval'])
-        occurs['#CHROM'] = chrom
-        occurs['START'] = start
-        occurs['END'] = end
-        occurs['STRAND'] = strand
-        occurs['Pval'] = df['p-val']
-        return occurs
+        # reverse-complement position p (1-based) corresponds to forward
+        # position 2L + 2 - p (1-based)
+        start = region_start + 2 * seq_length + 1 - motif_end
+        end = region_start + 2 * seq_length + 2 - motif_start
+    return chrom, start, end, strand, pvalue
 
 
-def write_bed(occurs, ofile):
-    occurs.to_csv(ofile, sep='\t', index=False, float_format='%0.2e')
+def convert(occurrence_file, bed_file):
+    with open(occurrence_file) as fin, open(bed_file, "w") as fout:
+        print("#CHROM", "START", "END", "STRAND", "Pval", sep="\t", file=fout)
+        header_line = fin.readline()
+        if not header_line.startswith("seq\t"):
+            raise ValueError(f"{occurrence_file} does not look like a .occurrence file")
+        for line in fin:
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) < 6:
+                continue
+            header, length, strand, pos, _pattern, pvalue = fields[:6]
+            chrom, start, end, strand, pvalue = occurrence_to_bed(header, int(length), strand, pos, pvalue)
+            print(chrom, start, end, strand, f"{float(pvalue):0.2e}", sep="\t", file=fout)
 
 
-def main():
-    parser = create_parser()
-    args = parser.parse_args()
+def main(argv=None):
+    args = create_parser().parse_args(argv)
 
-    ipath = args.occurence_file
+    outdir = args.outdir if args.outdir is not None else os.path.dirname(args.occurrence_file)
+    if outdir and not os.path.exists(outdir):
+        os.makedirs(outdir)
+    basename = os.path.splitext(os.path.basename(args.occurrence_file))[0]
+    bed_file = os.path.join(outdir, basename + ".bed")
 
-    if args.o is None:
-        dir = os.path.dirname(ipath)
-    else:
-        dir = args.o
-
-    if not os.path.exists(dir):
-        os.makedirs(dir)
-    basename = os.path.splitext(os.path.basename(ipath))[0] # note this needs to be changed.
-    ofile = os.path.join(dir, basename + ".bed")
-    occurs = parse_occur(ipath)
-
-    write_bed(occurs, ofile)
+    try:
+        convert(args.occurrence_file, bed_file)
+    except ValueError as err:
+        sys.exit(f"Error: {err}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

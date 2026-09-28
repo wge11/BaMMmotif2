@@ -39,12 +39,16 @@ suppressMessages(library( LSD ))
 # Parameter setting
 #
 #-----------------------------
+# Options such as --SFC accept TRUE/FALSE as well as 1/0 (current versions of
+# the argparse package reject "1" for logical options, so they are parsed here).
+as_flag <- function(x) toupper(as.character(x)) %in% c("TRUE", "T", "1", "YES")
+
 parser <- ArgumentParser(description="evaluate motifs optimized by BaMM")
 # positional arguments
 parser$add_argument('target_directory', help="directory that contains the target file")
 parser$add_argument('prefix', help="prefix of the target file")
 # optional arguments
-parser$add_argument("--web", type="logical", default=FALSE, help="flag for printing out ausfc score on the screen" )
+parser$add_argument("--web", default="FALSE", metavar="TRUE|FALSE", help="flag for printing out ausfc score on the screen" )
 
 # parse the arguments
 args    <- parser$parse_args()
@@ -55,7 +59,7 @@ prefix 	<- args$prefix
 ofile   <- paste(dir, '/', prefix, ".bmscore", sep = "" )
 
 # flag for verbose output for web usage
-web             = args$web
+web             = as_flag(args$web)
 
 ###########################
 ## For this script we need a slightly modified version of the fdrtool function.
@@ -660,7 +664,7 @@ results = c()
 resultTitle = paste0(c("TF", "#", "d_ausfc", "d_occur", "m_ausfc", "m_occur", "auc5", "auprc"), collapse="\t")
 results = c(results, resultTitle)
 
-if( length(Sys.glob(paste(c(dir, "/", prefix, "*", ".zoops.stats")))) == 0 ){
+if( length(Sys.glob(paste(c(dir, "/", prefix, "*", ".zoops.stats"), collapse=""))) == 0 ){
     stop("no input file exists in the folder!")
 }
 

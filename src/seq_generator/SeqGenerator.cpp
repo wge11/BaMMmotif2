@@ -12,23 +12,20 @@ SeqGenerator::SeqGenerator( std::vector<Sequence*> seqs, Motif* motif, size_t sO
 		Y_.push_back( ipow( Alphabet::getSize(), k ) );
 	}
 
-    v_ = ( float** )calloc( sOrder_+1, sizeof( float* ) );
-	n_ = ( size_t** )calloc( sOrder_+1, sizeof( size_t* ) );
-    range_bar_ = ( float** )calloc( sOrder_+1, sizeof( float* ) );
-    v_seq_ = ( float** )calloc( sOrder_+1, sizeof( float* ) );
-    n_seq_ = ( size_t** )calloc( sOrder_+1, sizeof( size_t* ) );
+    v_.resize( sOrder_+1 );
+    n_.resize( sOrder_+1 );
+    range_bar_.resize( sOrder_+1 );
+    v_seq_.resize( sOrder_+1 );
+    n_seq_.resize( sOrder_+1 );
 	for( size_t k = 0; k < sOrder_+1; k++ ) {
-        v_[k] = (float *) calloc(Y_[k + 1], sizeof(float));
-        n_[k] = (size_t *) calloc(Y_[k + 1], sizeof(size_t));
-        range_bar_[k] = (float *) calloc(Y_[k + 1], sizeof(float));
-        v_seq_[k] = (float *) calloc(Y_[k + 1], sizeof(float));
-        n_seq_[k] = (size_t *) calloc(Y_[k + 1], sizeof(size_t));
+        v_[k].assign( Y_[k + 1], 0.0f );
+        n_[k].assign( Y_[k + 1], 0 );
+        range_bar_[k].assign( Y_[k + 1], 0.0f );
+        v_seq_[k].assign( Y_[k + 1], 0.0f );
+        n_seq_[k].assign( Y_[k + 1], 0 );
     }
 
-    A_ = ( float* )calloc( sOrder_+1, sizeof( float ) );
-    for( size_t k = 0; k < sOrder_+1; k++ ){
-        A_[k] = 20.f;
-    }
+    A_.assign( sOrder_+1, 20.f );
 
     rngx_.seed( 42 );
     srand( 42 );
@@ -41,23 +38,6 @@ SeqGenerator::SeqGenerator( std::vector<Sequence*> seqs, Motif* motif, size_t sO
 }
 
 SeqGenerator::~SeqGenerator(){
-
-	for( size_t k = 0; k < sOrder_+1; k++ ){
-        free( v_[k] );
-		free( n_[k] );
-        free( range_bar_[k] );
-        free( v_seq_[k] );
-        free( n_seq_[k] );
-	}
-
-    free( v_ );
-	free( n_ );
-    free( range_bar_ );
-    free( v_seq_ );
-	free( n_seq_ );
-
-    free( A_ );
-
 }
 
 void SeqGenerator::calculate_kmer_frequency(){
@@ -386,7 +366,7 @@ std::vector<std::unique_ptr<Sequence>> SeqGenerator::arti_posset_motif_embedded(
     }
 
     // randomly shuffle the sequence set after implantation
-    std::random_shuffle( posset_with_motif_embedded.begin(), posset_with_motif_embedded.end() );
+    util::random_shuffle( posset_with_motif_embedded.begin(), posset_with_motif_embedded.end() );
 
     return posset_with_motif_embedded;
 }

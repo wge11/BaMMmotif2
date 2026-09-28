@@ -73,7 +73,7 @@ int main( int nargs, char* args[] ){
     /**
      * read in input files
      */
-    if( nargs < 3 ) {
+    if( nargs < 4 ) {
         std::cerr << "Error: Arguments are missing!" << std::endl
                   << "Usage: extractProbs <outdir> <bamm foreground model(.ihbcp)> <bamm background model(.hbcp)>"
                   << std::endl;
@@ -91,19 +91,19 @@ int main( int nargs, char* args[] ){
     char* BgFilename = args[3];
 
     // define Alphabet type, just for getting the size of alphabet table
-    char* alphabetType = new char[9];
-    strcpy( alphabetType, "STANDARD" );
+    char alphabetType[] = "STANDARD";
     Alphabet::init( alphabetType );
 
     // build background model
     std::string BgBasename = baseName( BgFilename );
-    BackgroundModel* bgModel;
-    bgModel = new BackgroundModel( BgFilename );
+    BackgroundModel bgModel( BgFilename );
     // save background model
-    bgModel->write( outputDirectory, BgBasename );
+    bgModel.write( outputDirectory, BgBasename );
 
     // construct foreground model and save it
-    constructBaMM(BaMMFilename, outputDirectory, bgModel->getV(), bgModel->getOrder());
+    constructBaMM(BaMMFilename, outputDirectory, bgModel.getV(), bgModel.getOrder());
+
+    Alphabet::destruct();
 
     return 0;
 }

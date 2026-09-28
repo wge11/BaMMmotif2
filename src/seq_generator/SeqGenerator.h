@@ -46,15 +46,16 @@ private:
 
 	std::vector<Sequence*> 		seqs_;			// positive sequence set
 
-    float**                     v_;             // k-mer conditional probabilities
-	size_t** 					n_;			    // k-mer counts
-    float**                     range_bar_;     // store cumulated sum of k-mers
+    // all tables are indexed [k][y] for k = 0..sOrder and (k+1)-mers y
+    std::vector<std::vector<float>>  v_;        // k-mer conditional probabilities
+    std::vector<std::vector<size_t>> n_;        // k-mer counts
+    std::vector<std::vector<float>>  range_bar_; // store cumulated sum of k-mers
 
     // for re-scaling the background model
-    float**                     v_seq_;         // sequence-specific k-mer conditional probabilities
-    size_t** 					n_seq_;			// sequence-specific k-mer counts
+    std::vector<std::vector<float>>  v_seq_;    // sequence-specific k-mer conditional probabilities
+    std::vector<std::vector<size_t>> n_seq_;    // sequence-specific k-mer counts
 
-    float*                      A_;             // pseudo-parameter for k-mer counting
+    std::vector<float>          A_;             // pseudo-parameter for k-mer counting
 	Motif* 						motif_;			// the optimized motif
 	size_t						sOrder_;	    // the order of k-mers for generating negative/pseudo sequence set
     float                       q_;             // portion of sequences in the set that are masked/embedded with the motif

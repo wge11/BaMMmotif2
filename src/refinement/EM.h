@@ -37,6 +37,8 @@ public:
 
 private:
 
+    float                   sumLogLikelihood() const; // sum seqLogLikelihood_ in a thread-independent order
+
     Motif* 					motif_;				// motif to optimize within the EM
     BackgroundModel*		bgModel_;			// background model
 
@@ -65,6 +67,10 @@ private:
 
     bool                    verbose_;           // show the output of each EM iteration
     std::vector<size_t>		Y_;
+
+    std::vector<float>      seqLogLikelihood_;  // per-sequence log likelihood of the last E-step
+    std::vector<double>     blockCounts_;       // scratch buffer for the per-block k-mer counts in MStep()
+    static const size_t     maxMStepBlocks_ = 32; // number of sequence blocks reduced in MStep()
 
 };
 

@@ -89,7 +89,7 @@ int GSimu::readArguments( int nargs, char* args[] ){
                 std::cerr << "No expression following --alphabet" << std::endl;
                 exit( 2 );
             }
-            alphabetType = args[i];
+            alphabetType = strdup( args[i] );
         } else if( !strcmp( args[i], "--bindingSiteFile" ) ){
             if( ++i >= nargs ){
                 printHelp();
@@ -186,8 +186,7 @@ int GSimu::readArguments( int nargs, char* args[] ){
     }
 
     if( alphabetType == NULL ){
-        alphabetType = new char[9];
-        strcpy( alphabetType, "STANDARD" );
+        alphabetType = strdup( "STANDARD" );
     }
 
     modelAlpha.resize( modelOrder+1 );
@@ -274,6 +273,6 @@ void GSimu::printHelp(){
 
 void GSimu::destruct(){
     Alphabet::destruct();
-    if( alphabetType ) 		delete[] alphabetType;
+    if( alphabetType ) 		free( alphabetType );
     if( sequenceSet )	 	delete sequenceSet;
 }

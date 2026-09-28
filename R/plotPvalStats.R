@@ -34,13 +34,17 @@ suppressMessages(library( LSD ))
 # Parameter setting
 #
 #-----------------------------
+# Options such as --SFC accept TRUE/FALSE as well as 1/0 (current versions of
+# the argparse package reject "1" for logical options, so they are parsed here).
+as_flag <- function(x) toupper(as.character(x)) %in% c("TRUE", "T", "1", "YES")
+
 parser <- ArgumentParser(description="evaluate motifs optimized by BaMM")
 # positional arguments
 parser$add_argument('target_directory', help="directory that contains the target file")
 parser$add_argument('prefix', help="prefix of the target file")
 # optional arguments
-parser$add_argument("--plots", type="logical", default=FALSE, help="flag for printing out plots" )
-parser$add_argument("--web", type="logical", default=FALSE, help="flag for printing out AvRec score on the screen" )
+parser$add_argument("--plots", default="FALSE", metavar="TRUE|FALSE", help="flag for printing out plots" )
+parser$add_argument("--web", default="FALSE", metavar="TRUE|FALSE", help="flag for printing out AvRec score on the screen" )
 
 # parse the arguments
 args    <- parser$parse_args()
@@ -50,10 +54,10 @@ dir 	<- args$target_directory
 prefix 	<- args$prefix
 
 # flag for verbose output for web usage
-web     <- args$web
+web     <- as_flag(args$web)
 
 # flag for plots
-plots   <- args$plots
+plots   <- as_flag(args$plots)
 
 # preset variables
 dir <- gsub('/$', '', dir)

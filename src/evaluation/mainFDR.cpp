@@ -52,17 +52,7 @@ int main( int nargs, char* args[] ){
      * Filter out short sequences
      */
     std::vector<Sequence*> posSet = GFdr::posSequenceSet->getSequences();
-    size_t count = 0;
-    std::vector<Sequence*>::iterator it = posSet.begin();
-    while( it != posSet.end() ){
-        if( (*it)->getL() < motif_set.getMaxW() ){
-            //std::cout << "Warning: remove the short sequence: " << (*it)->getHeader() << std::endl;
-            posSet.erase(it);
-            count++;
-        } else {
-            it++;
-        }
-    }
+    size_t count = removeShortSequences( posSet, motif_set.getMaxW() );
     std::cout << "Note: " << count << " short sequences have been filtered out." << std::endl;
 
     /**
@@ -75,7 +65,7 @@ int main( int nargs, char* args[] ){
     }
 
     if( GFdr::fixedPosN and GFdr::maxPosN < posN ){
-        std::random_shuffle(posSet.begin(), posSet.end());
+        util::random_shuffle( posSet.begin(), posSet.end() );
         for( size_t n = posN-GFdr::maxPosN; n > 0; n-- ){
             posSet.erase( posSet.begin() + GFdr::maxPosN + n - 1 );
         }
@@ -94,7 +84,7 @@ int main( int nargs, char* args[] ){
         // from positive training sequence set
         posN = posSet.size();   // update the size of positive sequences after filtering
         std::vector<std::unique_ptr<Sequence>> negSeqs;
-        SeqGenerator negseq( posSet, NULL, GFdr::sOrder , GFdr::genericNeg );
+        SeqGenerator negseq( posSet, NULL, GFdr::sOrder, 1.0f, GFdr::genericNeg );
         if( !GFdr::fixedNegN and posN >= GFdr::negN ){
             negSeqs = negseq.sample_bgseqset_by_fold( GFdr::mFold );
             std::cout << GFdr::mFold << " x " << posN << " background sequences are generated." << std::endl;
@@ -127,6 +117,7 @@ int main( int nargs, char* args[] ){
         perLoopThreads = GFdr::threads;
     }
 
+    (void) mainLoopThreads;     // only used when compiled with OpenMP
 #pragma omp parallel for num_threads( mainLoopThreads )
 
     for( size_t n = 0; n < motif_set.getN(); n++ ){
