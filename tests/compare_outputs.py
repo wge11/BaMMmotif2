@@ -5,6 +5,8 @@ Every file present in the reference directory must also exist in the
 candidate directory. Files are compared line by line and token by token:
 numeric tokens must agree within ``--rtol``/``--atol``; all other tokens
 must match exactly. Runtime lines (``Runtime ...``) are ignored.
+Reference files may be gzip-compressed (``name.gz`` is compared with
+``name`` in the candidate directory).
 
 Usage:
     compare_outputs.py REFERENCE_DIR CANDIDATE_DIR [--rtol 1e-3] [--atol 1e-5]
@@ -13,6 +15,7 @@ Exit status is 0 when all files agree and 1 otherwise.
 """
 
 import argparse
+import gzip
 import math
 import sys
 from pathlib import Path
@@ -37,10 +40,17 @@ def to_float(token):
         return None
 
 
+def read_lines(path):
+    if path.suffix == ".gz":
+        with gzip.open(path, "rt") as handle:
+            return handle.read().splitlines()
+    return path.read_text().splitlines()
+
+
 def compare_file(ref_path, cand_path, rtol, atol, max_report):
     """Return (n_mismatches, max_abs_diff, messages) for one file pair."""
-    ref_lines = ref_path.read_text().splitlines()
-    cand_lines = cand_path.read_text().splitlines()
+    ref_lines = read_lines(ref_path)
+    cand_lines = read_lines(cand_path)
     messages = []
     mismatches = 0
     max_diff = 0.0
@@ -87,6 +97,8 @@ def main(argv=None):
     failed = False
     for ref_path in ref_files:
         rel = ref_path.relative_to(args.reference)
+        if rel.suffix == ".gz":
+            rel = rel.with_suffix("")
         cand_path = args.candidate / rel
         if not cand_path.exists():
             print(f"MISSING  {rel}")
