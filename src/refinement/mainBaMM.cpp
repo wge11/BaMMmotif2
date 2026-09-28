@@ -133,7 +133,12 @@ int main( int nargs, char* args[] ){
 
 		} else if ( Global::CGS ){
 			GibbsSampling model( motif, bgModel, posSet,
-                                 !Global::noQSampling, Global::verbose );
+                                 !Global::noQSampling,
+                                 Global::modelBeta, Global::modelGamma,
+                                 !Global::noInitialZ, !Global::noZSampling,
+                                 !Global::noAlphaOptimization,
+                                 Global::GibbsMHalphas, Global::dissampleAlphas,
+                                 Global::verbose );
 			// learn motifs by collapsed Gibbs sampling
 			model.optimize();
 			// write model parameters on the disc
