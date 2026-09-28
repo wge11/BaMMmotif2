@@ -138,6 +138,7 @@ void ScoreSeqSet::calcPvalues( const std::vector<std::vector<float>>& pos_scores
 				float SlLower = neg_all_scores[negN-FPl];
 				p_value = ( ( float )FPl + ( SlHigher - Sl + eps ) / ( SlHigher - SlLower + eps ) ) / ( float )negN;
 			}
+            p_value = std::min( p_value, 1.f );
             mops_p_values_[n].push_back( p_value );
             mops_e_values_[n].push_back( p_value * ( float )posN );
 		}
@@ -204,6 +205,12 @@ void ScoreSeqSet::write( char* odir, std::string basename, float pvalCutoff, boo
 		size_t LW1 = seqSet_[n]->getL() - motif_->getW() + 1;
 
         for( size_t i = 0; i < LW1; i++ ){
+
+            // on double-stranded sequences, skip windows that span the
+            // separator between the forward and the reverse-complement strand
+            if( !ss and i <= seqlen and i + motif_->getW() > seqlen ){
+                continue;
+            }
 
 			if( mops_p_values_[n][i] < pvalCutoff ){
                 // >header:sequence_length

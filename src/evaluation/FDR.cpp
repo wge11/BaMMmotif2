@@ -283,7 +283,8 @@ void FDR::calculatePR(){
 //                std::cout << i<<'\t'<< n_top << '\t' << negScoreMax_[n_top] << '\t' << Sl << '\t' << p_value << '\t'<< std::endl;
             }
 
-			PN_Pvalue_.push_back( p_value );
+			// guard against rounding and interpolation beyond the last negative score
+			PN_Pvalue_.push_back( std::min( p_value, 1.0f ) );
 
 			// take the faction of q sequences as real positives
 			if( idx_posMax == posN_est ){

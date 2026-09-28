@@ -621,6 +621,11 @@ void EM::write( char* odir, std::string basename, bool ss ){
 
         for( size_t i = 0; i < seqs_[n]->getL()-W_+1; i++ ){
 
+            // skip windows spanning the separator between the two strands
+            if( !ss and i <= L and i + W_ > L ){
+                continue;
+            }
+
             if( r_[n][seqs_[n]->getL() -W_-i] >= cutoff ){
                 ofile_pos << seqs_[n]->getHeader() << '\t' << L << '\t'
                           << ( ( i < L ) ? '+' : '-' ) << '\t' << i + 1 << ".." << i+W_ << '\t';
