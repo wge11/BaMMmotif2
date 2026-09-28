@@ -1,0 +1,4 @@
+# Python helper scripts in py/
+numpy>=1.20
+scipy>=1.5
+scikit-learn>=0.24   # filterPWM.py only

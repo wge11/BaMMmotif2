@@ -29,7 +29,9 @@ def parse_args(argv=None):
     parser.add_argument("candidate", type=Path, help="directory with new outputs")
     parser.add_argument("--rtol", type=float, default=1e-3, help="relative tolerance (default: 1e-3)")
     parser.add_argument("--atol", type=float, default=1e-5, help="absolute tolerance (default: 1e-5)")
-    parser.add_argument("--max-report", type=int, default=5, help="differences to print per file (default: 5)")
+    parser.add_argument(
+        "--max-report", type=int, default=5, help="differences to print per file (default: 5)"
+    )
     return parser.parse_args(argv)
 
 
@@ -89,7 +91,9 @@ def compare_file(ref_path, cand_path, rtol, atol, max_report):
 
 def main(argv=None):
     args = parse_args(argv)
-    ref_files = sorted(p for p in args.reference.rglob("*") if p.is_file() and p.suffix not in IGNORED_SUFFIXES)
+    ref_files = sorted(
+        p for p in args.reference.rglob("*") if p.is_file() and p.suffix not in IGNORED_SUFFIXES
+    )
     if not ref_files:
         print(f"no reference files found in {args.reference}", file=sys.stderr)
         return 1

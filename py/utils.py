@@ -1,13 +1,14 @@
+import glob
+import operator
+import os
+import re
+
 import numpy as np
 from scipy.special import xlogy
-import operator
-from sklearn.cluster import AffinityPropagation
-import re
-import os
-import glob
 
 loge2 = np.log(2)
 alpha = 0.8
+
 
 def calculate_H_model_bg(model, bg):
     H = xlogy(model, model).sum(axis=1) / loge2
@@ -46,18 +47,18 @@ def create_slices(m, n, min_overlap=2):
     # these are the patterns overlapping the edges with at least min_overlap
     # nucleotides
     for ov in range(min_overlap, n):
-        yield slice(0, ov), slice(-ov, None), slice(0, 0), slice(m - ov, m), slice(0, n-ov)
+        yield slice(0, ov), slice(-ov, None), slice(0, 0), slice(m - ov, m), slice(0, n - ov)
         yield slice(-ov, None), slice(0, ov), slice(0, m - ov), slice(0, 0), slice(ov, n)
 
 
 def model_sim(model1, model2, min_overlap=2):
     # initialization
-    pwm1 = model1['pwm']
-    pwm2 = model2['pwm']
-    H_model1_bg = model1['H_model_bg']
-    H_model2_bg = model2['H_model_bg']
-    H_model1 = model1['H_model']
-    H_model2 = model2['H_model']
+    pwm1 = model1["pwm"]
+    pwm2 = model2["pwm"]
+    H_model1_bg = model1["H_model_bg"]
+    H_model2_bg = model2["H_model_bg"]
+    H_model1 = model1["H_model"]
+    H_model2 = model2["H_model"]
 
     # my design model2 cannot be longer than model1
     models_switched = False
@@ -78,7 +79,6 @@ def model_sim(model1, model2, min_overlap=2):
 
     # calculate similarity score between model1 and model2
     for sl1, sl2, uh1l, uh1r, uh2 in create_slices(len(pwm1), len(pwm2), min_overlap):
-
         # so we want the contributions of the background
         background_score = 0
         background_score += H_model1_bg[sl1].sum()
@@ -133,7 +133,6 @@ def model_sim(model1, model2, min_overlap=2):
         contributions.append((alpha * background_score, cross_score, padding_score))
         slices.append((sl1, sl2))
 
-
     # find the maximum similarity score
     # very neat: https://stackoverflow.com/a/6193521/2272172
     max_index, max_score = max(enumerate(scores), key=operator.itemgetter(1))
@@ -154,15 +153,15 @@ def model_sim(model1, model2, min_overlap=2):
 def update_models(models):
     upd_models = []
     for model in models:
-        model['pwm'] = np.array(model['pwm'], dtype=float)
-        model_length, _ = model['pwm'].shape
-        model['bg_freq'] = np.array(model['bg_freq'], dtype=float)
-        if 'H_model_bg' not in model or 'H_model' not in model:
-            model['H_model_bg'] = calculate_H_model_bg(model['pwm'], model['bg_freq'])
-            model['H_model'] = calculate_H_model(model['pwm'])
+        model["pwm"] = np.array(model["pwm"], dtype=float)
+        model_length, _ = model["pwm"].shape
+        model["bg_freq"] = np.array(model["bg_freq"], dtype=float)
+        if "H_model_bg" not in model or "H_model" not in model:
+            model["H_model_bg"] = calculate_H_model_bg(model["pwm"], model["bg_freq"])
+            model["H_model"] = calculate_H_model(model["pwm"])
         else:
-            model['H_model_bg'] = np.array(model['H_model_bg'], dtype=float)
-            model['H_model'] = np.array(model['H_model'], dtype=float)
+            model["H_model_bg"] = np.array(model["H_model_bg"], dtype=float)
+            model["H_model"] = np.array(model["H_model"], dtype=float)
         upd_models.append(model)
     return upd_models
 
@@ -178,88 +177,85 @@ def filter_pwms(models, min_overlap=2):
             matrix_sim[x_idx][y_idx] = sim_score
 
     # apply affinity propagation to cluster models
-    af = AffinityPropagation(affinity='precomputed').fit(matrix_sim)
+    # (imported here so that the other helpers do not require scikit-learn)
+    from sklearn.cluster import AffinityPropagation
+
+    af = AffinityPropagation(affinity="precomputed").fit(matrix_sim)
     af_labels = af.labels_
-    #print(af_labels)
+    # print(af_labels)
 
     new_models = []
     for rank in range(total_models):
-        for idx, model in enumerate(models, start=0):
+        for idx, model in enumerate(models):
             if af_labels[idx] == rank:
-                new_models.append(models[idx])
+                new_models.append(model)
                 break
 
     return new_models
 
 
 def parse_meme(meme_input_file):
-    dataset = {}
-    with open(meme_input_file) as handle:
+    """Read a MEME (minimal) motif file, version 4.
 
+    Returns a dict with the keys ``version``, ``alphabet``, ``bg_freq`` and
+    ``models``. Each model is a dict with ``model_id``, ``info`` (the
+    letter-probability matrix line), ``pwm`` (list of rows), ``bg_freq``,
+    ``motif_length``, ``H_model_bg`` and ``H_model``.
+    """
+    # defaults for files without ALPHABET / background frequency lines
+    dataset = {"alphabet": "ACGT", "bg_freq": [0.25, 0.25, 0.25, 0.25]}
+    models = []
+
+    with open(meme_input_file) as handle:
         line = handle.readline()
 
         # check the MEME format version
-        if 'MEME version 4' not in line:
-            raise ValueError('requires MEME minimal file format version 4')
-        else:
-            dataset['version'] = line.strip()
+        if "MEME version 4" not in line:
+            raise ValueError("requires MEME minimal file format version 4")
+        dataset["version"] = line.strip()
 
-        models = []
         for line in handle:
+            if line.startswith("ALPHABET"):
+                dataset["alphabet"] = line.split("=", 1)[1].split()[0]
 
-            # read in the ALPHABET info
-            if line.startswith('ALPHABET'):
-                dataset['alphabet'] = line.split()[1]
-            else:
-                dataset['alphabet'] = 'unknown'
-
-            # skip strands lines
-            if line.startswith('strands'):
+            elif line.startswith("strands"):
                 continue
 
-            if line.startswith('Background letter frequencies'):
+            elif line.startswith("Background letter frequencies"):
                 bg_toks = handle.readline().split()[1::2]
-                bg_freqs = [float(f) for f in bg_toks]
-                dataset['bg_freq'] = bg_freqs
-            else:
-                # if not given, assign 0.25 to each letter
-                dataset['bg_freq'] = [0.25,0.25,0.25,0.25]
-                bg_freqs = dataset['bg_freq']
+                dataset["bg_freq"] = [float(f) for f in bg_toks]
 
-            if line.startswith('MOTIF'):
-                model = {}
-                model['model_id'] = line.split()[1]
-                model['bg_freq'] = bg_freqs
+            elif line.startswith("MOTIF"):
+                model = {"model_id": line.split()[1], "bg_freq": dataset["bg_freq"]}
 
-                # read in the information line
-                readline = True
-                while readline:
+                # read up to the information line of the matrix
+                while not line.startswith("letter-probability matrix"):
                     line = handle.readline()
-                    if line.startswith('letter-probability matrix'):
-                        readline = False
-                info_line = line.rstrip('\n')
-                model['info'] = info_line
-                width_hit = re.compile('w= (\d+)').search(info_line)
+                    if not line:
+                        raise MalformattedMemeError(
+                            f"no letter-probability matrix for motif {model['model_id']}"
+                        )
+                info_line = line.rstrip("\n")
+                model["info"] = info_line
+                width_hit = re.search(r"w=\s*(\d+)", info_line)
                 if not width_hit:
-                    raise MalformattedMemeError('could not read motif width')
+                    raise MalformattedMemeError("could not read motif width")
 
                 # read in the PWM
                 pwm_length = int(width_hit.group(1))
-                pwm = []
-
-                for i in range(pwm_length):
-                    pwm.append([float(p) for p in handle.readline().split()])
+                pwm = [[float(p) for p in handle.readline().split()] for _ in range(pwm_length)]
 
                 pwm_arr = np.array(pwm, dtype=float)
-                bg_arr = np.array(bg_freqs, dtype=float)
+                bg_arr = np.array(model["bg_freq"], dtype=float)
 
-                model['pwm'] = pwm
-                model['motif_length'] = pwm_length
-                model['H_model_bg'] = calculate_H_model_bg(pwm_arr, bg_arr).tolist()
-                model['H_model'] = calculate_H_model(pwm_arr).tolist()
+                model["pwm"] = pwm
+                model["motif_length"] = pwm_length
+                model["H_model_bg"] = calculate_H_model_bg(pwm_arr, bg_arr).tolist()
+                model["H_model"] = calculate_H_model(pwm_arr).tolist()
 
                 models.append(model)
-        dataset['models'] = models
+
+    dataset["models"] = models
     return dataset
 
 
@@ -275,10 +271,9 @@ def parse_bamm_db(db_path):
 
     bamms = []
 
-    bamm_suffix = '*.ihbcp'
+    bamm_suffix = "*.ihbcp"
 
     for eachdir in os.listdir(db_path):
-
         for ifile in glob.glob(os.path.join(db_path, eachdir, bamm_suffix)):
             bamm = parse_single_bamm_from_file(ifile)
             bamms.append(bamm)
@@ -291,22 +286,22 @@ def parse_single_bamm_from_file(bamm_ifile):
     # get the basename of the file
     bn = os.path.splitext(os.path.basename(bamm_ifile))[0]
     dir = os.path.splitext(os.path.dirname(bamm_ifile))[0]
-    bg_file = os.path.join(dir, bn.split('_motif_')[0] +'.hbcp')
+    bg_file = os.path.join(dir, bn.split("_motif_")[0] + ".hbcp")
     bamm = {}
     if os.path.isfile(bamm_ifile):
         # read in the model order
         motif_order = 0
-        bamm['model_id'] = bn
+        bamm["model_id"] = bn
 
         with open(bamm_ifile) as bamm_file:
             for line in bamm_file:
-                if line[0] != '\n':
+                if line[0] != "\n":
                     motif_order = motif_order + 1
                 else:
                     break
 
         # count the motif length
-        motif_length = int( sum(1 for line in open(bamm_ifile)) / (motif_order + 1) )
+        motif_length = int(sum(1 for line in open(bamm_ifile)) / (motif_order + 1))
 
         # read in bamm model
         model = {}
@@ -314,9 +309,9 @@ def parse_single_bamm_from_file(bamm_ifile):
             model[k] = []
 
         with open(bamm_ifile) as bamm_file:
-            for j in range(motif_length):
+            for _ in range(motif_length):
                 for k in range(motif_order):
-                    model[k].append( [float(p) for p in bamm_file.readline().split()] )
+                    model[k].append([float(p) for p in bamm_file.readline().split()])
                 # skip the blank line
                 bamm_file.readline()
 
@@ -324,10 +319,10 @@ def parse_single_bamm_from_file(bamm_ifile):
         for k in range(motif_order):
             model[k] = np.array(model[k], dtype=float)
 
-        bamm['model'] = model
-        bamm['motif_length'] = motif_length
-        bamm['motif_order'] = motif_order
-        bamm['pwm'] = model[0]
+        bamm["model"] = model
+        bamm["motif_length"] = motif_length
+        bamm["motif_order"] = motif_order
+        bamm["pwm"] = model[0]
 
         # get background model frequency
         if os.path.isfile(bg_file):
@@ -335,41 +330,41 @@ def parse_single_bamm_from_file(bamm_ifile):
                 line = bgmodel_file.readline()  # skip the first line for K
                 line = bgmodel_file.readline()  # skip the second line for Alpha
                 bg_freq = [float(p) for p in bgmodel_file.readline().split()]
-            bamm['bg_freq'] = np.array(bg_freq, dtype=float)
+            bamm["bg_freq"] = np.array(bg_freq, dtype=float)
         else:
-            bamm['bg_freq'] = [0.25,0.25,0.25,0.25]
+            bamm["bg_freq"] = [0.25, 0.25, 0.25, 0.25]
 
         # set background model frequency
 
-        bamm['H_model_bg'] = calculate_H_model_bg(bamm['pwm'], bamm['bg_freq']).tolist()
-        bamm['H_model'] = calculate_H_model(bamm['pwm']).tolist()
+        bamm["H_model_bg"] = calculate_H_model_bg(bamm["pwm"], bamm["bg_freq"]).tolist()
+        bamm["H_model"] = calculate_H_model(bamm["pwm"]).tolist()
 
     return bamm
 
 
 def write_meme(dataset, meme_output_file):
     with open(meme_output_file, "w") as fh:
-        print(dataset['version'], file=fh)
+        print(dataset["version"], file=fh)
         print(file=fh)
 
-        print("ALPHABET= " + dataset['alphabet'], file=fh)
+        print("ALPHABET= " + dataset["alphabet"], file=fh)
         print(file=fh)
 
         print("Background letter frequencies", file=fh)
 
         bg_probs = []
-        for idx, nt in enumerate(dataset['alphabet']):
+        for idx, nt in enumerate(dataset["alphabet"]):
             bg_probs.append(nt)
-            bg_probs.append(str(dataset['bg_freq'][idx]))
+            bg_probs.append(str(dataset["bg_freq"][idx]))
         print(" ".join(bg_probs), file=fh)
         print(file=fh)
 
-        for model in dataset['models']:
-            print("MOTIF {}".format(model['model_id']), file=fh)
-            print(model['info'], file=fh)
+        for model in dataset["models"]:
+            print("MOTIF {}".format(model["model_id"]), file=fh)
+            print(model["info"], file=fh)
             pwm = model["pwm"]
             for line in pwm:
-                print(" ".join(['{:.4f}'.format(x) for x in line]), file=fh)
+                print(" ".join([f"{x:.4f}" for x in line]), file=fh)
             print(file=fh)
 
 
@@ -377,7 +372,7 @@ def write_bamm(pwm, ofile):
     eps = 1e-16
     with open(ofile, "w") as fh:
         for i in range(len(pwm)):
-            print(' '.join(['{:.4e}'.format(x+eps) for x in pwm[i]]) + ' \n', file=fh)
+            print(" ".join([f"{x + eps:.4e}" for x in pwm[i]]) + " \n", file=fh)
 
 
 class MalformattedMemeError(ValueError):

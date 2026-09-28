@@ -1,0 +1,10 @@
+# Style settings for the Python helper scripts (py/) and tests (tests/).
+# Run `ruff check py tests` and `ruff format py tests`.
+line-length = 110
+target-version = "py38"
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[lint.isort]
+known-first-party = ["utils"]
