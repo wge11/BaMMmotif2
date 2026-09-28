@@ -1,360 +1,403 @@
-# BaMM!motif - v2
+# BaMM!motif 2
 
-**Ba**yesian **M**arkov **M**odel **motif** discovery software (version 2).
+**Ba**yesian **M**arkov **M**odel **motif** discovery software, version 2.
 
-(C) Johannes Soeding, Wanwan Ge, Anja Kiesel, Matthias Siebert
+[![CI](https://github.com/wge11/BaMMmotif2/actions/workflows/ci.yml/badge.svg)](https://github.com/wge11/BaMMmotif2/actions/workflows/ci.yml)
 
-[![Build Status](https://travis-ci.org/soedinglab/BaMMmotif2.svg?branch=master)](https://travis-ci.org/soedinglab/BaMMmotif2)
+BaMM!motif learns higher-order Bayesian Markov models (BaMMs) of transcription
+factor binding motifs from ChIP-seq, ATAC-seq or other sets of enriched
+sequences. It starts from seed motifs (PWMs, BaMMs or binding sites), refines
+them with expectation maximisation (EM) or collapsed Gibbs sampling, evaluates
+them by cross-validation against sampled background sequences and reports
+motif occurrences with p-values.
 
-## Requirements
-To compile from source, you need:
+(C) Johannes Söding, Wanwan Ge, Anja Kiesel, Matthias Siebert
 
-  * [GCC](https://gcc.gnu.org/) compiler 4.7 or later (we suggest GCC-5.x)
-  * [CMake](http://cmake.org/) 2.8.11 or later
-  
-C++ packages
-  * [Boost](http://www.boost.org/) 
+| Tool | Purpose |
+|---|---|
+| `BaMMmotif` | refine seed motifs into BaMMs, optionally evaluate them (`--FDR`) and scan the input (`--scoreSeqset`) |
+| `BaMMScan` | scan sequences for occurrences of given motifs |
+| `FDR` | evaluate given motifs by cross-validation (precision, recall, p-values) |
+| `BaMMSimu` | sample background sequences, or embed/mask motifs in sequences |
+| `extractProbs` | convert a BaMM (`.ihbcp`) into probabilities (`.ihbp`) |
+| `R/*.R` | performance scores and plots (AUSFC, ROC, PR curves, logos, positional distribution) |
+| `py/*.py` | motif comparison and format conversion |
 
-To plot BaMM logos you need R and several R packages 
+For seed motifs we recommend our de novo motif discovery tool
+[PEnG-motif](https://github.com/soedinglab/PEnG-motif).
 
-  * [R](https://cran.r-project.org/) 2.14.1 or later
-  * install.packages( "zoo" )
-  * install.packages( "argparse" )
-  * install.packages( "fdrtool" )
-  * install.packages( "LSD" )
-  * install.packages( "grid" )
-  * install.packages( "gdata" )
+## Contents
+
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [BaMMmotif options](#bammmotif-options)
+- [Other command-line tools](#other-command-line-tools)
+- [Output files](#output-files)
+- [Downstream analysis](#downstream-analysis)
+- [BaMM file format](#bamm-file-format)
+- [Reproducibility and performance](#reproducibility-and-performance)
+- [Development](#development)
+- [Citation](#citation)
 
 ## Installation
 
-### Clone it from GIT
+### Requirements
 
-      git clone https://github.com/soedinglab/BaMMmotif2.git BaMMmotif
-      cd BaMMmotif
+- a C++14 compiler: GCC 5 or later, or Clang 3.4 or later
+- [CMake](https://cmake.org/) 3.10 or later
+- [Boost](https://www.boost.org/) headers (Boost.Math)
+- OpenMP (optional, for multi-threading; included with GCC)
 
-### How to compile BaMM!motif?
+On Debian/Ubuntu:
 
+```bash
+sudo apt-get install build-essential cmake libboost-dev
+```
 
-#### Linux
-      mkdir build
-      cd build
-      cmake -DCMAKE_INSTALL_PREFIX=${HOME}/opt/BaMM ..
-      make
-      make install
-      
-Adjust `${HOME}/opt/BaMM` if you want to change the directory for installation
+On macOS with [Homebrew](https://brew.sh/):
 
-#### OS X
-OS X ships clang instead of gcc. We recommend using [Homebrew](http://brew.sh/) to install gcc.
+```bash
+brew install cmake boost gcc
+export CXX=g++-14   # use your Homebrew GCC version; Apple clang works but builds without OpenMP
+```
 
-Having installed Homebrew, all required dependencies can be installed using the `brew` command
+### Build and install
 
-      brew tap homebrew/versions
-      brew tap homebrew/science
-      brew install gcc5 cmake R
+```bash
+git clone https://github.com/wge11/BaMMmotif2.git
+cd BaMMmotif2
+cmake -S . -B build -DCMAKE_INSTALL_PREFIX="$HOME/opt/BaMM"
+cmake --build build --parallel
+ctest --test-dir build          # optional: run all tools on the example data
+cmake --install build
+```
 
-#### Compilation
+This installs the executables and the R scripts into `$HOME/opt/BaMM/bin` and
+the Python scripts into `$HOME/opt/BaMM/share/bamm/py`. Add the `bin`
+directory to your `PATH`, for example in `~/.bashrc`:
 
-      export CXX=g++-5
-      export CC=gcc-5
-      export LDFLAGS="-static-libgcc -static-libstdc++"
+```bash
+export PATH="$PATH:$HOME/opt/BaMM/bin"
+```
 
-      mkdir build
-      cd build
-      cmake -DCMAKE_INSTALL_PREFIX=${HOME}/opt/BaMM ..
-      make 
-      make install
-      
-#### Environment setup
-Add this line to your $HOME/.bashrc (or .zshrc...) to add BaMMmotif to your PATH:
+Build options (pass with `-D<option>=ON`):
 
-    export PATH=${PATH}:${HOME}/opt/BaMM/bin
-    
-Update your environment:    
+| Option | Effect |
+|---|---|
+| `CMAKE_BUILD_TYPE` | `Release` (default), `RelWithDebInfo`, `Debug` or `ASan` (AddressSanitizer) |
+| `BAMM_NATIVE` | optimise for the CPU of the build machine (`-march=native`); the binaries may not run on other machines |
+| `BAMM_WERROR` | treat compiler warnings as errors |
 
-    source $HOME/.bashrc
+### Dependencies of the helper scripts
 
-## How to use BaMM!motif from the command line?
+- R scripts: R with the packages `argparse`, `zoo`, `fdrtool`, `LSD` and
+  `gdata` (`install.packages(c("argparse", "zoo", "fdrtool", "LSD", "gdata"))`;
+  the `argparse` package also needs Python).
+- Python scripts: Python 3.8 or later with `numpy`, `scipy` and, for
+  `filterPWM.py`, `scikit-learn` (`pip install -r py/requirements.txt`).
 
-### SYNOPSIS
+## Quick start
 
-      BaMMmotif DIRPATH FILEPATH [OPTIONS]
+The `example/` directory contains 300 JunD ChIP-seq peaks (`JunD.fasta`) and
+seed PWMs from PEnG-motif (`PWM_peng10.meme`).
 
-### DESCRIPTION
+```bash
+# 1. refine the first two seed PWMs into 2nd-order BaMMs with EM,
+#    evaluate them by 4-fold cross-validation and scan the input sequences
+BaMMmotif results example/JunD.fasta --PWMFile example/PWM_peng10.meme --maxPWM 2 \
+    --EM --FDR --scoreSeqset
 
-      Bayesian Markov Model motif discovery software.
+# 2. performance scores (AUSFC, pAUC, AUPRC) and evaluation plots
+evaluateBaMM.R results JunD --SFC 1 --ROC5 1 --PRC 1
 
-      DIRPATH
-          Output directory for the results.
+# 3. sequence logos of order 0, 1 and 2
+for k in 0 1 2; do plotBaMMLogo.R results JunD_motif_1 $k; done
 
-      FILEPATH
-          FASTA file with positive sequences of equal length.
+# 4. positional distribution of the motif occurrences
+plotMotifDistribution.R results JunD
+```
 
-### OPTIONS
+To scan other sequences with a learned model:
 
-Sequence options
+```bash
+BaMMScan scan_out peaks.fasta --BaMMFile results/JunD_motif_1.ihbcp \
+    --bgModelFile results/JunD.hbcp
+```
 
-      --alphabet <STRING>
-          STANDARD.         For alphabet type ACGT, default setting;
-          METHYLC.          For alphabet type ACGTM;
-          HYDROXYMETHYLC.   For alphabet type ACGTH;
-          EXTENDED.         For alphabet type ACGTMH.
-      
-      --ss
-          Search motif only on single strand strands (positive sequences).
-          This option is not recommended for analyzing ChIP-seq data.
-          By default, BaMM searches motifs on both strands.
-          
-      --negSeqSet <FILEPATH>
-          FASTA file with negative/background sequences used to learn the
-          (homogeneous) background BaMM. If not specified, the background BaMM
-          is learned from the positive sequences.
+## BaMMmotif options
 
-  Options to initialize BaMM(s) from file
+```text
+BaMMmotif OUTDIR SEQFILE (--PWMFile FILE | --BaMMFile FILE | --bindingSiteFile FILE) [OPTIONS]
+```
 
-      --bindingSiteFile <FILEPATH>
-          File with binding sites of equal length (one per line).
-      
-      --PWMFile <STRING>
-          File that contains position weight matrices (PWMs).
-      
-      --BaMMFile <STRING>
-          File that contains a model in bamm file format.
+`OUTDIR` is created if necessary; `SEQFILE` is a FASTA file with the positive
+sequences. `BaMMmotif --help` prints the same list.
 
-      --maxPWM <INTEGER>
-          Number of models to be learned by BaMM!motif, specific for PWMs.
+**Input**
 
-  Options for the (inhomogeneous) motif BaMMs
+| Option | Description | Default |
+|---|---|---|
+| `--alphabet STRING` | `STANDARD` (ACGT), `METHYLC` (ACGTM), `HYDROXYMETHYLC` (ACGTH) or `EXTENDED` (ACGTMH) | `STANDARD` |
+| `--ss` | search the given strand only (not recommended for ChIP-seq data) | both strands |
+| `--negSeqFile FILE` | FASTA file with background sequences; `BaMMmotif` only reports it in the summary and samples its own background set (`BaMMScan` learns its background model from it) | – |
+| `--basename STRING` | prefix of all output files | basename of `SEQFILE` |
 
-      -k|--order <INTEGER>
-          Model order. The default is 2.
+**Initial models** (exactly one is required)
 
-      -a|--alpha <FLOAT> [<FLOAT>...]
-          Order-specific prior strength. The default is 1.0 (for k = 0) and
-          beta x gamma^k (for k > 0). The options -b and -g are ignored.
+| Option | Description |
+|---|---|
+| `--PWMFile FILE` | position weight matrices in [MEME format](https://meme-suite.org/meme/doc/meme-format.html) |
+| `--BaMMFile FILE` | a BaMM (`.ihbcp`); needs `--bgModelFile` when scoring without optimisation |
+| `--bindingSiteFile FILE` | binding sites of equal length, one per line |
+| `--maxPWM INT` | number of motifs from `--PWMFile` to use (default: all) |
 
-      -b|--beta <FLOAT>
-          Calculate order-specific alphas according to beta x gamma^k (for
-          k > 0). The default is 7.0.
+**Motif model**
 
-      -g|--gamma <FLOAT>
-          Calculate order-specific alphas according to beta x gamma^k (for
-          k > 0). The default is 3.0.
+| Option | Description | Default |
+|---|---|---|
+| `-k, --order INT` | model order | 2 |
+| `-a, --alpha FLOAT...` | order-specific prior strengths; overrides `-b` and `-r` | 1 for k = 0, β·γ<sup>k</sup> for k > 0 |
+| `-b, --beta FLOAT` | β in α<sub>k</sub> = β·γ<sup>k</sup> | 7 |
+| `-r, --gamma FLOAT` | γ in α<sub>k</sub> = β·γ<sup>k</sup> | 3 |
+| `--extend INT [INT]` | add uniform positions to both ends, or to the left and right end separately (`--extend 0 2`) | 0 |
+| `-q FLOAT` | prior fraction of sequences that contain the motif | 0.3 |
 
-      --extend <INTEGER>{1,2}
-          Extend BaMMs by adding uniformly initialized positions to the left
-          and/or right of initial BaMMs. Invoking e.g. with --extend 0 2 adds
-          two positions to the right of initial BaMMs. Invoking with --extend 2
-          adds two positions to both sides of initial BaMMs. By default, BaMMs
-          are not being extended.
-      
-      -q <FLOAT>
-          Prior probability for a positive sequence to contain a motif. The
-          default is 0.9.
-          
-      -s, --sOrder <INTERGER>
-          The order of k-mer for sampling pseudo/negative set. The default is 2.
+**Background model**
 
-  Options for the (homogeneous) background BaMM
+| Option | Description | Default |
+|---|---|---|
+| `-K, --Order INT` | background model order | 2 |
+| `-A, --Alpha FLOAT...` | prior strengths | 1 for k = 0, 10 for k > 0 |
+| `--bgModelFile FILE` | read the background model from a `.hbcp` file | learned from `SEQFILE` |
 
-      -K <INTEGER>
-          Order. The default is 2.
+**Optimisation** (without `--EM` or `--CGS` the initial model is used as it is)
 
-      -A|--Alpha <FLOAT>
-          Prior strength. The default is 10.0.
-      
-      --bgModelFile <STRING>
-          Read in background model from a bamm-formatted file. 
+| Option | Description |
+|---|---|
+| `--EM` | expectation maximisation |
+| `--CGS` | collapsed Gibbs sampling (100 iterations) |
+| `--noInitialZ` | CGS: start from random motif positions instead of one E-step |
+| `--noZSampling` | CGS: do not sample motif positions |
+| `--noQSampling` | CGS: do not sample the motif fraction q |
+| `--noAlphaOpti` | CGS: do not optimise the prior strengths α |
+| `--GibbsMH` | CGS: sample α with Metropolis–Hastings |
+| `--dissample` | CGS: sample α from a discretised posterior |
 
-  EM options
+**Evaluation**
 
-      --EM
-          Triggers Expectation Maximization (EM) algorithm.
-          
-  Gibbs sampling options
+| Option | Description | Default |
+|---|---|---|
+| `--FDR` | cross-validate the models and write precision/recall statistics (`.zoops.stats`) | off |
+| `-n, --cvFold INT` | number of cross-validation folds | 4 |
+| `-m, --mFold INT` | background sequences per positive sequence; raised automatically to give at least 5,000 | 1 |
+| `-s, --sOrder INT` | k-mer order used to sample background sequences | 2 |
+| `--mops` | also evaluate the multiple-occurrences-per-sequence model | off |
+| `--zoops BOOL` | evaluate the zero-or-one-occurrence-per-sequence model | 1 |
 
-      --CGS
-          Triggers Collapsed Gibbs Sampling (CGS) algorithm.
-      
-      --maxCGSIterations <INTEGER> 
-          Limit the number of CGS iterations.
-          It should be larger than 5 and defaults to 100.
+**Motif occurrences**
 
-  Options for model evaluation
-      
-      --FDR
-          Triggers False-Discovery-Rate (FDR) estimation.
-        
-      -m|--mFold <INTEGER>
-          Number of negative sequences as multiple of positive sequences.
-          The default is 10.
-      
-      -n, --cvFold <INTEGER>
-          Fold number for cross-validation. 
-          The default is 5, which means the training set is 4-fold of the test set.
-          
-  Output options
+| Option | Description | Default |
+|---|---|---|
+| `--scoreSeqset` | write motif occurrences with p- and E-values (`.occurrence`) | off |
+| `--pvalCutoff FLOAT` | p-value cutoff for reported occurrences | 1e-4 |
 
-      --saveBaMMs
-          Write optimized BaMM(s) to disk.
+**Output and performance**
 
-      --saveInitBaMMs
-          Write initialized BaMM(s) to disk.
-          
-      --verbose
-          Verbose terminal printouts.
+| Option | Description | Default |
+|---|---|---|
+| `--saveBaMMs` | also write k-mer counts (`.counts`) and motif positions (`.positions`) | off |
+| `--saveInitialBaMMs` | write the initial models (`_init_motif_<i>.ihbcp/.ihbp`) | off |
+| `--savePvalues` | write p-values of the cross-validation scores (`.zoops.pvalues`) | off |
+| `--saveLogOdds` | write log-odds scores of the positive and background sets | off |
+| `--savePRs BOOL` | write `.zoops.stats` with `--FDR` | 1 |
+| `--threads INT` | number of OpenMP threads | 4 |
+| `--verbose` | print the progress of every iteration | off |
+| `-h, --help` | print the help | |
 
-      -h, --help
-          Printout this help.
+## Other command-line tools
+
+Each tool prints its options with `-h`.
+
+```bash
+# scan sequences with PWMs (writes <basename>_motif_<i>.occurrence) or a BaMM (<basename>.occurrence)
+BaMMScan OUTDIR SEQFILE --PWMFile motifs.meme [--pvalCutoff 1e-4] [--negSeqFile bg.fasta]
+BaMMScan OUTDIR SEQFILE --BaMMFile model.ihbcp --bgModelFile model.hbcp
+
+# evaluate motifs by cross-validation (writes .zoops.stats, as BaMMmotif --FDR)
+FDR OUTDIR SEQFILE --PWMFile motifs.meme [--EM | --CGS] [--cvFold 4] [--threads 4]
+
+# sample background sequences, or embed / mask a motif in the input sequences
+BaMMSimu OUTDIR SEQFILE --sampleBgset [-s 2] [-m 10]
+BaMMSimu OUTDIR SEQFILE --BaMMFile model.ihbcp --embedSeqset [-q 0.5] [--at 50]
+
+# probabilities (.ihbp, .hbp) from conditional probabilities (.ihbcp, .hbcp)
+extractProbs OUTDIR model.ihbcp background.hbcp
+```
+
+## Output files
+
+For an input `JunD.fasta` (or `--basename JunD`) BaMMmotif writes:
+
+| File | Content | Written |
+|---|---|---|
+| `JunD.hbcp`, `JunD.hbp` | background model (conditional probabilities, probabilities) | always |
+| `JunD_motif_<i>.ihbcp`, `.ihbp` | refined motif model *i* | always |
+| `JunD_motif_<i>.zoops.stats` | TP, FP, FDR, recall and p-value per rank; header: background/positive ratio and motif occurrence fraction | `--FDR` |
+| `JunD_motif_<i>.occurrence` | motif occurrences: sequence, length, strand, start..end, pattern, p-value, E-value | `--scoreSeqset` |
+| `JunD_motif_<i>.counts`, `.positions` | k-mer counts; motif positions with responsibility ≥ 0.3 | `--saveBaMMs` |
+| `JunD_motif_<i>.alphas` | learned prior strengths α (CGS) | `--saveBaMMs --CGS` |
+| `JunD_motif_<i>.zoops.pvalues` | p-values of the cross-validation scores | `--savePvalues` |
+
+Positions in `.occurrence` files are 1-based on the scanned sequence. With both
+strands (the default), positions 1…L are the forward strand and positions
+L+2…2L+1 the reverse complement; `strand` is `+` or `-` accordingly.
+`py/occur2bed.py` converts the positions into genomic BED coordinates.
 
 ## Downstream analysis
 
-### Evaluate the performance of BaMMs
+The R scripts are installed next to the executables. On/off options take
+`1`/`0` or `TRUE`/`FALSE`.
 
-For evaluating the optimized BaMM models, a file with extension `.stats` is required. It can be generated either by running `BaMMmotif` with `--FDR` flag, or by running `FDR` program independently.
+### Performance scores and evaluation plots
 
-Either
+`evaluateBaMM.R` needs the `.zoops.stats` files written by `BaMMmotif --FDR`
+or `FDR`. It calculates the area under the sensitivity–FDR curve (AUSFC), the
+partial ROC AUC up to 5 % FPR (pAUC) and the area under the precision–recall
+curve (AUPRC) and writes them to `<prefix>.bmscore`.
 
-    ${HOME}/opt/BaMM/bin/BaMMmotif [OUTPUT_FIR] [FASTAFILE] [MOTIF_FILE] [options] --FDR
+```bash
+evaluateBaMM.R INPUT_DIR PREFIX [--SFC 1] [--ROC5 1] [--PRC 1]
+```
 
-or
+`PREFIX` selects the files `INPUT_DIR/PREFIX*.zoops.stats`, e.g. `JunD` for
+all motifs of a run. The options add plots:
 
-    ${HOME}/opt/BaMM/bin/FDR [OUTPUT_FIR] [FASTAFILE] [MOTIF_FILE]
+| Option | Plot |
+|---|---|
+| `--SFC 1` | sensitivity–FDR curve |
+| `--ROC5 1` | partial ROC curve up to 5 % false positive rate |
+| `--PRC 1` | precision–recall curve |
 
-R script `evaluateBaMM.R` is provided in the installation directory `${HOME}/opt/BaMM/bin` to calculate the performance score AUSFC and optionally plot precision-recall curve, partial ROC, and sensitivity-FDR curve. You can run it like:
+![Sensitivity-FDR curve](example/images/JunD_motif_1_SFC.jpeg)
+![Partial ROC curve](example/images/JunD_motif_1_pROC.jpeg)
+![Precision-recall curve](example/images/JunD_motif_1_PRC.jpeg)
 
-    ${HOME}/opt/BaMM/bin/evaluateBaMM.R [INPUT_DIR] [PREFIX_OF_STATS_FILE] [options]
-    
-The options are:
+`plotSFC.R INPUT_DIR PREFIX` and `plotPvalStats.R INPUT_DIR PREFIX --plots 1`
+produce further fdrtool-based evaluation plots.
 
-`--SFC 1` for plotting the sensitivity-false discovery rate curve.
+### Sequence logos
 
-`--ROC5 1` for plotting the partial ROC with the first 5% of TPR.
+```bash
+plotBaMMLogo.R INPUT_DIR PREFIX ORDER [--revComp 1] [--stamp 1]
+```
 
-`--PRC 1` for plotting the precision-recall curve.
+`PREFIX` selects `INPUT_DIR/PREFIX*.ihbcp` (with the matching `.ihbp`), `ORDER`
+is the logo order (0, 1 or 2, at most the model order). `--revComp 1` plots the
+reverse complement (order 0), `--stamp 1` omits the axes.
 
-You will get the following plots:
+![Logo of order 0](example/images/JunD_motif_1-logo-order-0.png)
+![Logo of order 1](example/images/JunD_motif_1-logo-order-1.png)
+![Logo of order 2](example/images/JunD_motif_1-logo-order-2.png)
 
-![image](example/images/JunD_motif_1_SFC.jpeg)
+### Positional distribution of motif occurrences
 
-![image](example/images/JunD_motif_1_pROC.jpeg)
+```bash
+plotMotifDistribution.R INPUT_DIR PREFIX
+```
 
-![image](example/images/JunD_motif_1_PRC.jpeg)
+needs the `.occurrence` files from `BaMMmotif --scoreSeqset` or `BaMMScan`
+and writes `<prefix>_motif_<i>_distribution.png`. It assumes that all input
+sequences have the same length.
 
-The performance scores such as AUSFC, pAUC amd AUPRC are written in the `.bmscore` file.
-    
-### How to plot BaMM logos?
+![Motif distribution](example/images/JunD_motif_1_ds_distribution.jpeg)
 
-R script `platBaMMLogo.R` is provided in the installation directory `${HOME}/opt/BaMM/bin` to plot the BaMM logo from a BaMM flat file. 
+### Python scripts
 
-It requires output files with extension `.ihbcp`, `.ihbp`, `.hbcp` or `.hbp` from BaMMmotif as input.
+Run from the `py/` directory (they import `utils.py`).
 
-The logo order is an integer between 0 to 2. 
+| Script | Purpose |
+|---|---|
+| `BaMMmatch.py QUERY.meme DB_DIR OUT.tsv` | compare motifs with a database of BaMMs (`DB_DIR/*/*.ihbcp`); reports p- and E-values of similar motifs |
+| `filterPWM.py IN.meme OUT.meme` | remove redundant PWMs by clustering similar ones (affinity propagation) |
+| `pwm2bamm_local.py IN.meme [-o DIR]` | convert PWMs into 0th-order BaMM files |
+| `bamm2pwm.py MODEL.ihbcp OUT.meme` | convert the 0th order of a BaMM into a PWM with an IUPAC name |
+| `occur2bed.py FILE.occurrence [-o DIR]` | convert occurrences into BED coordinates; needs FASTA headers of the form `chr1:1000-1205` (as written by `bedtools getfasta`) |
 
-    plotBaMMLogo.R [INPUT_DIR] [PREFIX_OF_OCCURRENCE_FILE] [LOGO_ORDER]
+## BaMM file format
 
-You will get the following plots:
+Each inhomogeneous (motif) BaMM of order *K* and length *W* is written to two
+files with the same layout: `.ihbp` holds the probabilities and `.ihbcp` the
+conditional probabilities. Blank lines separate motif positions; within a
+position, line *k*+1 holds the values for order *k* = 0…*K*, with (*k*+1)-mers in
+lexicographic order (A, C, G, T; AA, AC, …, TT; AAA, …).
 
-![image](example/images/JunD_motif_1-logo-order-0.png)
+`.ihbp` (order 2, one position *j*):
 
-![image](example/images/JunD_motif_1-logo-order-1.png)
+```text
+Pj(A)   Pj(C)   Pj(G)   Pj(T)
+Pj(AA)  Pj(AC)  Pj(AG)  ... Pj(TT)
+Pj(AAA) Pj(AAC) Pj(AAG) ... Pj(TTT)
+```
 
-![image](example/images/JunD_motif_1-logo-order-2.png)
+`.ihbcp` (order 2, one position *j*):
 
-### Motif distribution analysis
+```text
+Pj(A)     Pj(C)     Pj(G)     Pj(T)
+Pj(A|A)   Pj(C|A)   Pj(G|A)   ... Pj(T|T)
+Pj(A|AA)  Pj(C|AA)  Pj(G|AA)  ... Pj(T|TT)
+```
 
-For visualizing the distribution of motifs in the sequence set, you need to generate either a `.occurrence` file by executing `BaMMmotif` with a `--scoreSeqset` flag or by executing `BaMMScan`.
+The homogeneous background BaMM uses the same layout for a single position:
+`.hbp` holds the probabilities and `.hbcp` the conditional probabilities. Its
+first two lines are comments with the order and the prior strengths
+(`# K = 2`, `# A = 1 10 10`).
 
-Either
+## Reproducibility and performance
 
-    ${HOME}/opt/BaMM/bin/BaMMmotif [OUTPUT_FIR] [FASTAFILE] [MOTIF_FILE] [options] --scoreSeqset
+- Results do not depend on the number of threads: sums over sequences are
+  accumulated in a fixed order and random numbers are drawn serially, so two
+  runs with the same input and options give identical output.
+- EM, Gibbs sampling, scoring and cross-validation use OpenMP; set the number
+  of threads with `--threads`.
+- Build in `Release` mode (the default) for production use; `-DBAMM_NATIVE=ON`
+  adds CPU-specific optimisations.
 
-or
-    
-    ${HOME}/opt/BaMM/bin/BaMMScan [OUTPUT_FIR] [FASTAFILE] [MOTIF_FILE]
-    
-After obtaining a `.occurrence` file, you can run R script `plotMotifDistribution.R` provided in the installation directory `${HOME}/opt/BaMM/bin` to visualise the motif distribution:
+## Development
 
-    ${HOME}/opt/BaMM/bin/plotMotifDistribution.R [INPUT_DIR] [PREFIX_OF_OCCURRENCE_FILE] [option]
+```bash
+cmake -S . -B build -DBAMM_WERROR=ON && cmake --build build --parallel
+ctest --test-dir build --output-on-failure        # C++ tools vs tests/reference
+python -m unittest discover -s tests              # Python scripts
+ruff check py tests && ruff format --check py tests
+```
 
-The option is:
+`tests/run_examples.sh BIN_DIR OUT_DIR` runs every tool on the example data and
+`tests/compare_outputs.py` compares two output directories with a numeric
+tolerance, which is useful for checking that a change preserves results. After
+an intended change of results, regenerate `tests/reference` from a new run
+(gzip each output file). Continuous integration (GitHub Actions) builds with
+GCC and Clang and runs both test suites. See [CHANGELOG.md](CHANGELOG.md) for
+changes.
 
-`--ss 1` for only plotting the distribution of motif on single strand. Otherwise, it will visualize motif distribution on both strands.
+## Citation
 
-You will get one of the following plots:
+If you use BaMM!motif, please cite:
 
-![image](example/images/JunD_motif_1_ds_distribution.jpeg)
-
-![image](example/images/JunD_motif_1_ss_distribution.jpeg)
-
-Note that, this analysis currently only work for sequences set with sequences of the same length.
-
-## BaMM flat file format
-
-BaMM!motif generates two files for each inhomogeneous BaMM: 
-
-1. file with extension `.ihbp` contains probabilities of BaMM model;
-
-2. file with extension `.ihbcp` contains conditional probabilities of BaMM model.
-
-The format is the same for these two files. While blank lines separate BaMM positions, lines 1 to *k*+1 of each BaMM position contain the (conditional) probabilities for order 0 to order *k*. For instance, the format for a BaMM of order 2 and length *W* is as follows:
-
-Filename extension: `.ihbp`
-
-P<sub>1</sub>(A) P<sub>1</sub>(C) P<sub>1</sub>(G) P<sub>1</sub>(T)<br>
-P<sub>1</sub>(AA) P<sub>1</sub>(AC) P<sub>1</sub>(AG) P<sub>1</sub>(AT) P<sub>1</sub>(CA) P<sub>1</sub>(CC) P<sub>1</sub>(CG) ... P<sub>1</sub>(TT)<br>
-P<sub>1</sub>(AAA) P<sub>1</sub>(AAC) P<sub>1</sub>(AAG) P<sub>1</sub>(AAT) P<sub>1</sub>(ACA) P<sub>1</sub>(ACC) P<sub>1</sub>(ACG) ... P<sub>1</sub>(TTT)<br>
-
-P<sub>2</sub>(A) P<sub>2</sub>(C) P<sub>2</sub>(G) P<sub>2</sub>(T)<br>
-P<sub>2</sub>(AA) P<sub>2</sub>(AC) P<sub>2</sub>(AG) P<sub>2</sub>(AT) P<sub>2</sub>(CA) P<sub>2</sub>(CC) P<sub>2</sub>CG) ... P<sub>2</sub>(TT)<br>
-P<sub>2</sub>(AAA) P<sub>2</sub>(AAC) P<sub>2</sub>(AAG) P<sub>2</sub>(AAT) P<sub>2</sub>(ACA) P<sub>2</sub>(ACC) P<sub>2</sub>(ACG) ... P<sub>2</sub>(TTT)<br>
-...
-
-P<sub>W</sub>(A) P<sub>W</sub>(C) P<sub>W</sub>(G) P<sub>W</sub>(T)<br>
-P<sub>W</sub>(AA) P<sub>W</sub>(AC) P<sub>W</sub>(AG) P<sub>W</sub>(AT) P<sub>W</sub>(CA) P<sub>W</sub>(CC) P<sub>W</sub>CG) ... P<sub>W</sub>(TT)<br>
-P<sub>W</sub>(AAA) P<sub>W</sub>(AAC) P<sub>W</sub>(AAG) P<sub>W</sub>(AAT) P<sub>W</sub>(ACA) P<sub>W</sub>(ACC) P<sub>W</sub>(ACG) ... P<sub>W</sub>(TTT)<br>
-
-Filename extension: `.ihbcp`
-
-P<sub>1</sub>(A) P<sub>1</sub>(C) P<sub>1</sub>(G) P<sub>1</sub>(T)<br>
-P<sub>1</sub>(A|A) P<sub>1</sub>(C|A) P<sub>1</sub>(G|A) P<sub>1</sub>(T|A) P<sub>1</sub>(A|C) P<sub>1</sub>(C|C) P<sub>1</sub>(G|C) ... P<sub>1</sub>(T|T)<br>
-P<sub>1</sub>(A|AA) P<sub>1</sub>(C|AA) P<sub>1</sub>(G|AA) P<sub>1</sub>(T|AA) P<sub>1</sub>(A|AC) P<sub>1</sub>(C|AC) P<sub>1</sub>(G|AC) ... P<sub>1</sub>(T|TT)<br>
-
-P<sub>2</sub>(A) P<sub>2</sub>(C) P<sub>2</sub>(G) P<sub>2</sub>(T)<br>
-P<sub>2</sub>(A|A) P<sub>2</sub>(C|A) P<sub>2</sub>(G|A) P<sub>2</sub>(T|A) P<sub>2</sub>(A|C) P<sub>2</sub>(C|C) P<sub>2</sub>(G|C) ... P<sub>2</sub>(T|T)<br>
-P<sub>2</sub>(A|AA) P<sub>2</sub>(C|AA) P<sub>2</sub>(G|AA) P<sub>2</sub>(T|AA) P<sub>2</sub>(A|AC) P<sub>2</sub>(C|AC) P<sub>2</sub>(G|AC) ... P<sub>2</sub>(T|TT)<br>
-...
-
-P<sub>W</sub>(A) P<sub>W</sub>(C) P<sub>W</sub>(G) P<sub>W</sub>(T)<br>
-P<sub>W</sub>(A|A) P<sub>W</sub>(C|A) P<sub>W</sub>(G|A) P<sub>W</sub>(T|A) P<sub>W</sub>(A|C) P<sub>W</sub>(C|C) P<sub>W</sub>(G|C) ... P<sub>W</sub>(T|T)<br>
-P<sub>W</sub>(A|AA) P<sub>W</sub>(C|AA) P<sub>W</sub>(G|AA) P<sub>W</sub>(T|AA) P<sub>W</sub>(A|AC) P<sub>W</sub>(C|AC) P<sub>W</sub>(G|AC) ... P<sub>W</sub>(T|TT)<br>
-
-
-In addition, BaMM!motif generates two files for the homogeneous background BaMM:
-1. file with extension `.ihbp` contains probabilities of background model;
-
-2. file with extension `.ihbcp` contains conditional probabilities of background model.
-
-For instance, the format for a background BaMM of order 2 is as follows:
-
-Filename extension: `.hbp`
-
-P(A) P(C) P(G) P(T)<br>
-P(AA) P(AC) P(AG) P(AT) P(CA) P(CC) P(CG) ... P(TT)<br>
-P(AAA) P(AAC) P(AAG) P(AAT) P(ACA) P(ACC) P(ACG) ... P(TTT)<br>
-
-Filename extension: `.hbcp`
-
-P(A) P(C) P(G) P(T)<br>
-P(A|A) P(C|A) P(G|A) P(T|A) P(A|C) P(C|C) P(G|C) ... P(T|T)<br>
-P(A|AA) P(C|AA) P(G|AA) P(T|AA) P(A|AC) P(C|AC) P(G|AC) ... P(T|TT)<br>
+- Ge W, Meier M, Roth C, Söding J. Bayesian Markov models improve the
+  prediction of binding motifs beyond first order. *NAR Genomics and
+  Bioinformatics* 3(2):lqab026 (2021).
+  [doi:10.1093/nargab/lqab026](https://doi.org/10.1093/nargab/lqab026)
+- Siebert M, Söding J. Bayesian Markov models consistently outperform PWMs at
+  predicting motifs in nucleotide sequences. *Nucleic Acids Research*
+  44(13):6055–6069 (2016).
 
 ## License
 
-BaMM!motif is released under the GNU General Public License v3 or later. See LICENSE for more details.
+BaMM!motif is released under the GNU General Public License v3 or later; see
+[LICENSE](LICENSE). It includes GetOpt_pp (GPLv3) by Daniel Gutson and
+`cmake/FindASan.cmake` (MIT) by Matthew Arsenault.
 
-## Notes
+## Contact
 
-We are welcoming bug reports! Please contact us at soeding@mpibpc.mpg.de .
-
-For the seeding phase, we recommend to use our de novo motif discovery tool [PEnG-motif](https://github.com/soedinglab/PEnG-motif).
+Bug reports and questions are welcome as
+[GitHub issues](https://github.com/wge11/BaMMmotif2/issues).
