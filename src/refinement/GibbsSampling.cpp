@@ -97,7 +97,7 @@ void GibbsSampling::optimize(){
 
     // initialize z for all the sequences
     if( initializeZ_ ){
-        EM model( motif_, bg_, seqs_, q_ );
+        EM model( motif_, bg_, seqs_, false );
         // E-step: calculate posterior
         model.EStep();
 
@@ -119,7 +119,8 @@ void GibbsSampling::optimize(){
         // initialize z with a random number
         for( size_t n = 0; n < seqs_.size(); n++ ){
             size_t LW2 = seqs_[n]->getL() - W_ + 2;
-            z_[n] = static_cast<size_t>( rand() ) % LW2;
+            std::uniform_int_distribution<size_t> uniform_z( 0, LW2 - 1 );
+            z_[n] = uniform_z( rngx_ );
         }
     }
 
@@ -367,14 +368,16 @@ void GibbsSampling::Collapsed_Gibbs_sampling_z(){
             r_[n][i] = 1.0f;
         }
 
-        // todo: could be parallelized by extracting 8 sequences at once
         // ij = i+j runs over all positions in sequence
+        float* __restrict r = r_[n];
+        const size_t YK = Y_[K_+1];
         for( size_t ij = 0; ij < LW1; ij++ ){
             // extract (K+1)-mer y from positions (i-k,...,i)
-            size_t y = kmer[ij] % Y_[K_+1];
+            const float* __restrict s_y = s_[kmer[ij] % YK];
+            float* __restrict r_ij = r + ( L - W_ - ij );
             // j runs over all motif positions
             for( size_t j = 0; j < W_; j++ ){
-                r_[n][L-W_-ij+j] *= s_[y][j];
+                r_ij[j] *= s_y[j];
             }
         }
 
@@ -390,7 +393,9 @@ void GibbsSampling::Collapsed_Gibbs_sampling_z(){
         llikelihood_ += logf( normFactor );
 
         // normalize responsibilities and append them to a vector of posteriors
-        std::vector<float> posteriors;
+        // (posteriors_ is a member so that its memory is reused across sequences)
+        std::vector<float>& posteriors = posteriors_;
+        posteriors.clear();
         // append the posterior of not having any motif on the sequence
         posteriors.push_back( ( 1.f - q_ ) / normFactor );
         for( int i = L-W_; i>=0; i-- ){
@@ -422,8 +427,11 @@ void GibbsSampling::Collapsed_Gibbs_sampling_z(){
 void GibbsSampling::Gibbs_sample_q(){
 
     // sampling the fraction of sequences which contain the motif
+    // (uses the sampler's own random engine rather than the global rand(),
+    //  which is not thread-safe when several folds are sampled in parallel)
     boost::math::beta_distribution<float> q_beta_dist( ( float )seqs_.size() - ( float )N0_ + 1.0f, ( float )N0_ + 1.0f );
-    q_ = quantile( q_beta_dist, ( float )rand() / ( float )RAND_MAX );
+    std::uniform_real_distribution<float> uniform_dist( 0.0f, 1.0f );
+    q_ = quantile( q_beta_dist, uniform_dist( rngx_ ) );
 
 }
 
