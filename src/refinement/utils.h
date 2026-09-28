@@ -2,6 +2,7 @@
 #define UTILS_H_
 
 #include <algorithm>	// e.g. std::sort
+#include <cstdlib>		// e.g. std::rand
 #include <limits>		// e.g. std::numeric_limits
 #include <numeric>		// e.g. std::numeric
 #include <vector>
@@ -371,6 +372,19 @@ inline double digamma(double x)
 
 namespace util
 {
+    // Shuffle [first, last) with the global rand(), exactly as the former
+    // libstdc++ std::random_shuffle did. std::random_shuffle is deprecated
+    // in C++14 and removed in C++17; this keeps shuffled outputs unchanged.
+    template < typename RandomIt >
+    void random_shuffle( RandomIt first, RandomIt last )
+    {
+        if( first == last ) return;
+        for( RandomIt i = first + 1; i != last; ++i ){
+            RandomIt j = first + std::rand() % ( ( i - first ) + 1 );
+            if( i != j ) std::iter_swap( i, j );
+        }
+    }
+
 #if __cplusplus == 201402L // C++14
 
     using std::make_unique ;

@@ -2,7 +2,7 @@
 // Created by wanwan on 16.08.17.
 //
 #include "GibbsSampling.h"
-#include "Global.h"
+#include <iomanip>
 
 #include <boost/math/special_functions.hpp>			/* gamma and digamma function */
 #include <boost/math/distributions/beta.hpp>		/* beta distribution */
