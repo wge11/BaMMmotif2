@@ -124,6 +124,11 @@ int Global::readArguments( int nargs, char* args[] ){
 	 * process flags from user
 	 */
 
+	if( nargs >= 2 && ( !strcmp( args[1], "-h" ) || !strcmp( args[1], "--help" ) ) ){
+		printHelp();
+		exit( 0 );
+	}
+
 	if( nargs < 3 ) {
 		std::cerr << "Error: Arguments are missing! \n" << std::endl;
 		printHelp();
@@ -143,7 +148,7 @@ int Global::readArguments( int nargs, char* args[] ){
 
 	if( opt >> GetOpt::OptionPresent( 'h', "help" ) ){
 		printHelp();
-		exit( 1 );
+		exit( 0 );
 	}
 
     // read in the basename of output file,
@@ -298,12 +303,11 @@ int Global::readArguments( int nargs, char* args[] ){
     // masking options
 	opt >> GetOpt::Option( 'f', f );
 
-	// FDR options
-	if( opt >> GetOpt::OptionPresent( "FDR", FDR ) ){
-		opt >> GetOpt::Option( 'm', "mFold", mFold );
-		opt >> GetOpt::Option( 'n', "cvFold", cvFold );
-		opt >> GetOpt::Option( 's', "sOrder", sOrder );
-	}
+	// FDR options (-m and -s also apply to the background set used by --scoreSeqset)
+	opt >> GetOpt::OptionPresent( "FDR", FDR );
+	opt >> GetOpt::Option( 'm', "mFold", mFold );
+	opt >> GetOpt::Option( 'n', "cvFold", cvFold );
+	opt >> GetOpt::Option( 's', "sOrder", sOrder );
 	// motif occurrence option
 	opt >> GetOpt::OptionPresent( "scoreSeqset", scoreSeqset );
 	opt >> GetOpt::Option( "pvalCutoff", pvalCutoff );
@@ -391,164 +395,93 @@ void Global::printStat(){
 }
 
 void Global::printHelp(){
-	printf("\n==================================================================\n");
-	printf("\n SYNOPSIS:	BaMMmotif OUTDIR SEQFILE [options] \n\n");
-	printf("\t DESCRIPTION \n");
-	printf("		Learn Bayesian inhomogeneous Markov init(BaMMs) from\n"
-			"		high-throughput sequencing data.\n\n");
-	printf("\t OUTDIR:  output directory for all results. \n");
-	printf("\t SEQFILE: file with positive sequence set in FASTA format.\n\n");
-	printf("\n OPTIONS: \n");
-	printf("\n		Options for reading in sequence file: \n");
-	printf("\n			--alphabet <STRING> \n"
-			"				STANDARD.		For alphabet type ACGT, by default;\n"
-			"				METHYLC. 		For alphabet type ACGTM;\n"
-			"				HYDROXYMETHYLC.	For alphabet type ACGTH;\n"
-			"				EXTENDED.		For alphabet type ACGTMH.\n\n");
-	printf("\n			--ss \n"
-			"				Search motif only on single-strand sequences.\n"
-			"				This option is not recommended for analyzing\n"
-			"				ChIP-seq data. \n"
-			"				By default, BaMM searches motifs on both strands.\n\n");
-	printf("\n			--negSeqFile \n"
-			"				FASTA file with negative/background sequences used\n"
-			"				to learn the (homogeneous) background BaMM.\n"
-			"				If not specified, the background BaMM is learned\n"
-			"				from the positive sequences. \n\n");
-	printf("\n		Options for HT-SELEX data: \n");
-	printf("\n			--intensityFile	<STRING> \n"
-			"				Intensity file name. (Not implemented yet.) \n\n");
-	printf("\n		Options for initialize BaMM(s) from file: \n");
-	printf("\n 			--BaMMpatternFile <STRING> \n"
-			"				File with IUPAC patterns.(Not implemented yet.) \n\n");
-	printf("\n 			--bindingSiteFile <STRING> \n"
-			"				File with binding sites of equal length(one per line).\n\n");
-	printf("\n 			--PWMFile <STRING> \n"
-			"				File that contains position weight matrices(PWMs).\n");
-	printf("\n 			--BaMMFile <STRING> \n"
-			"				File that contains a model in bamm file format.\n\n");
-	printf("\n 			--maxPWM <INTEGER> \n"
-			"				Number of init to be learned by BaMM!motif, \n"
-			"				specific for PWMs. \n"
-			"				By default, all the motifs will be optimized.\n\n");
-	printf("\n 			--mops \n"
-			"				Learn more-than-one-motif-per-sequence (MOPS) model.\n"
-			"				By default, it is set as false.\n\n");
-	printf("\n 			--zoops \n"
-			"				Learn zero-or-one-motif-per-sequence (ZOOPS) model.\n"
-			"				By default, it is set as true.\n\n");
-	printf("\n 		Options for the (inhomogeneous) motif BaMM: \n");
-	printf("\n 			-k, --order <INTEGER> \n"
-			"				Model Order. The default is 2. \n\n");
-	printf("\n 			-a, --alpha <FLOAT> [<FLOAT>...] \n"
-			"				Order-specific prior strength. The default is 1.0 \n"
-			"				(for k = 0) and beta x gamma^k (for k > 0). \n"
-			"				The options -b and -r are ignored.\n\n");
-	printf("\n 			-b, --beta <FLOAT> \n"
-			"				For calculating alphas: beta x gamma^k (for k > 0).\n"
-			"				The default is 7.0 (for k > 0) \n");
-	printf("\n 			-r, --gamma <FLOAT> \n"
-			"				For calculating alphas: beta x gamma^k (for k > 0).\n"
-			"				The default is 3.0 (for k > 0) \n");
-	printf("\n 			--extend <INTEGER>{1, 2} \n"
-			"				Extend BaMMs by adding uniformly initialized positions\n"
-			"				to the left and/or right of initial BaMMs.\n "
-			"				e.g. invoking with --extend 0 2 adds two positions\n"
-			"				to the right of initial BaMMs.\n"
-			"				Invoking with --extend 2 adds two positions to both\n"
-			"				sides of initial BaMMs.\n"
-			"				By default, BaMMs are not being extended.\n\n");
-	printf("\n 		Options for the (homogeneous) background BaMM: \n");
-	printf("\n 			-K, --Order <INTEGER> \n"
-			"				Order. The default is 2.\n"
-			"				Order of background model should not exceed order of\n"
-			"				motif model.\n\n");
-	printf("\n 			-A, --Alpha <FLOAT> \n"
-			"				Prior strength. The default value is 10.0.\n\n");
-	printf("\n 			--bgModelFile <STRING> \n"
-			"				Read in background model from a bamm-formatted file.\n"
-			"				Defaults to NULL.\n\n");
-	printf("\n 		Options for EM: \n");
-	printf("\n 			--EM  \n"
-			"				Triggers Expectation Maximization (EM) algorithm.\n "
-			"				Defaults to false.\n\n");
-	printf("\n 			-q <FLOAT> \n"
-			"				Prior probability for a positive sequence to contain\n"
-			"				a motif. The default value is 0.9.\n\n");
-	printf("\n 			-e, --epsilon <FLOAT> \n"
-			"				The EM algorithm is deemed to be converged when the\n"
-			"				sum over the absolute differences in probabilities\n"
-			"				from successive EM rounds is smaller than epsilon.\n"
-			"				The default is 0.001.\n\n");
-	printf("\n 			--maxEMIterations <INTEGER> (*) \n"
-			"				Limit the number of EM iterations. *For developers.\n\n");
-	printf("\n 			--noAlphaOptimization (*) \n"
-			"				disable alpha optimization.\n"
-			"				Defaults to false. *For developers.\n\n");
-	printf("\n 			--noQOptimization (*) \n"
-			"				disable q optimization.\n"
-			"				Defaults to false. *For developers.\n\n");
-	printf("\n 		Options for CGS: \n");
-	printf("\n 			--CGS\n"
-			"				Triggers Collapsed Gibbs Sampling (CGS) algorithm.\n"
-			"				Defaults to false.\n\n");
-	printf("\n 			--maxCGSIterations <INTEGER> (*) \n"
-			"				Limit the number of CGS iterations. \n"
-			"				It should be larger than 5 and defaults to 100.\n\n");
-	printf("\n 			--noAlphaSampling (*) \n"
-			"				disable alpha sampling.\n"
-			"				Defaults to false. *For developers.\n\n");
-	printf("\n 			--noQSampling (*) \n"
-			"				disable q sampling.\n"
-			"				Defaults to false. *For developers.\n\n");
-	printf("\n 		Options for FDR: \n");
-	printf("\n 			--FDR\n"
-			"				Triggers False-Discovery-Rate (FDR) estimation. \n\n");
-	printf("\n 			-m, --mFold <INTEGER>\n"
-			"				Number of negative sequences as multiple of positive\n"
-			"				sequences. The default is 10.\n\n");
-	printf("\n 			-n, --cvFold <INTEGER>\n"
-			"				Fold number for cross-validation. \n"
-			"				The default is 5, which means the training set is\n"
-			"				4-fold of the test set.\n\n"
-			"			-s, --sOrder <INTERGER>\n"
-			"				The order of k-mer for sampling pseudo/negative set.\n"
-			"				The default is 2.\n\n");
-	printf("\n 		Options for scoring sequence set:\n");
-	printf("\n 			--scoreSeqset \n"
-			"				Score the sequence set. \n\n");
-	printf("\n 			--pvalCutoff \n"
-			"				Cutoff of p-value for scoring the sequence set, in order to \n"
-			"				find motif occurrences. \n\n");
-	printf("\n 		Options for output:	\n");
-	printf("\n 			--verbose \n"
-			"				Verbose printouts.\n\n");
-	printf("\n 			--saveBaMMs\n"
-			"				Write optimized BaMM(s) parameters to disk.\n\n");
-	printf("\n 			--saveInitialBaMMs \n"
-			"				Save the initial BaMM model(s).\n\n");
-	printf("\n 			--savePRs\n"
-			"				Write true positives(TP), false positives(FP), \n"
-			"				FDR and recall values to disk. Defaults to true.\n\n");
-	printf("\n 			--savePvalues\n"
-			"				Write p-values for plotting area under the \n"
-			"				Sensitivity-FDR curve (AUSFC) to disk.\n\n");
-	printf("\n 			--saveLogOdds\n"
-			"				Write log odds scores from positive and negative \n"
-			"				sets to disk.\n"
-			"				The default for this log odds score is zero.\n\n");
-	printf("\n 			--saveBgModel\n"
-			"				Write background model to disk.\n\n");
-	printf("\n 			--scoreSeqset\n"
-			"				Find the motif occurrences on the sequences due to\n"
-			"				log odds scores and write them out.\n\n");
-    printf("\n 			--basename\n"
-           "				Specify the basename of output files.\n"
-           "				By default, all output files have the same basename as \n"
-           "				the input positive FASTA file.\n\n");
-	printf("\n 			-h, --help\n"
-			"				Printout this help function.\n\n");
-	printf("\n==================================================================\n");
+	// Keep this text in sync with readArguments() and README.md.
+	std::cout << R"(
+SYNOPSIS
+    BaMMmotif OUTDIR SEQFILE (--PWMFile FILE | --BaMMFile FILE | --bindingSiteFile FILE) [OPTIONS]
+
+DESCRIPTION
+    Refine motifs into higher-order Bayesian Markov models (BaMMs) with
+    EM or collapsed Gibbs sampling, evaluate them by cross-validation and
+    scan the input sequences for motif occurrences.
+
+    OUTDIR   output directory (created if necessary)
+    SEQFILE  positive sequences in FASTA format
+
+INPUT
+    --alphabet STRING       STANDARD (ACGT, default), METHYLC (ACGTM),
+                            HYDROXYMETHYLC (ACGTH) or EXTENDED (ACGTMH)
+    --ss                    search the given strand only (default: both strands;
+                            not recommended for ChIP-seq data)
+    --negSeqFile FILE       FASTA file with background sequences (reported in the
+                            summary; BaMMmotif samples its own background set)
+    --basename STRING       prefix of all output files (default: SEQFILE basename)
+
+INITIAL MODELS (exactly one is required)
+    --PWMFile FILE          position weight matrices in MEME format
+    --BaMMFile FILE         a BaMM (.ihbcp); requires --bgModelFile when scoring
+                            without optimisation
+    --bindingSiteFile FILE  binding sites of equal length, one per line
+    --maxPWM INT            number of motifs from --PWMFile to use (default: all)
+
+MOTIF MODEL
+    -k, --order INT         model order (default: 2)
+    -a, --alpha FLOAT...    order-specific prior strengths; overrides -b and -r
+                            (default: 1 for k = 0, beta * gamma^k for k > 0)
+    -b, --beta FLOAT        beta in alpha_k = beta * gamma^k (default: 7)
+    -r, --gamma FLOAT       gamma in alpha_k = beta * gamma^k (default: 3)
+    --extend INT [INT]      add INT uniform positions to both ends, or the given
+                            numbers to the left and right end (default: 0)
+    -q FLOAT                prior fraction of sequences with a motif (default: 0.3)
+
+BACKGROUND MODEL
+    -K, --Order INT         background model order (default: 2)
+    -A, --Alpha FLOAT...    prior strengths (default: 1 for k = 0, 10 for k > 0)
+    --bgModelFile FILE      read the background model from a .hbcp file
+
+OPTIMISATION (without --EM or --CGS the initial model is used as it is)
+    --EM                    expectation maximisation
+    --CGS                   collapsed Gibbs sampling (100 iterations)
+      --noInitialZ          start from random motif positions instead of one E-step
+      --noZSampling         do not sample motif positions
+      --noQSampling         do not sample the motif fraction q
+      --noAlphaOpti         do not optimise the prior strengths alpha
+      --GibbsMH             sample alphas with Metropolis-Hastings
+      --dissample           sample alphas from a discretised posterior
+
+EVALUATION (cross-validation)
+    --FDR                   estimate precision/recall by cross-validation and
+                            write OUTDIR/<basename>_motif_<i>.zoops.stats
+      -n, --cvFold INT      number of cross-validation folds (default: 4)
+      -m, --mFold INT       background sequences per positive sequence; raised
+                            automatically to give at least 5000 (default: 1)
+      -s, --sOrder INT      k-mer order used to sample background sequences
+                            (default: 2)
+    --mops                  also evaluate the multiple-occurrences-per-sequence model
+    --zoops BOOL            evaluate the zero-or-one-occurrence model (default: 1)
+
+MOTIF OCCURRENCES
+    --scoreSeqset           write motif occurrences with p-values to
+                            OUTDIR/<basename>_motif_<i>.occurrence
+    --pvalCutoff FLOAT      p-value cutoff for reported occurrences (default: 1e-4)
+
+OUTPUT
+    --saveBaMMs             also write k-mer counts (.counts) and motif positions
+                            (.positions) of the optimised models
+    --saveInitialBaMMs      write the initial models (_init_motif_<i>.ihbcp/.ihbp)
+    --savePvalues           write p-values of the cross-validation scores
+    --saveLogOdds           write log-odds scores of positive and background sets
+    --savePRs BOOL          write .zoops.stats with --FDR (default: 1)
+    --verbose               print progress of every iteration
+    -h, --help              print this help
+
+PERFORMANCE
+    --threads INT           number of OpenMP threads (default: 4); results do not
+                            depend on the number of threads
+
+The background model (.hbcp/.hbp) and the final motif models (.ihbcp/.ihbp)
+are always written to OUTDIR.
+)";
 }
 
 void Global::destruct(){

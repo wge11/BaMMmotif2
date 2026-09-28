@@ -291,7 +291,7 @@ void GScan::printHelp(){
               << "\t\t--maxPWM <INTEGER>" << std::endl
               << "\t\t\tmaximal number of PWMs that should be optimized." << std::endl
               << "\t\t--basename <STRING>" << std::endl
-              << "\t\t\tbasename of the outputt files." << std::endl
+              << "\t\t\tbasename of the output files." << std::endl
               << "\t\t--pvalCutoff <FLOAT>" << std::endl
               << "\t\t\tp-value cutoff for scoring the sequences." << std::endl ;
 }
